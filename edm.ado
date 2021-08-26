@@ -1,7 +1,7 @@
-*! version 1.6.1, 02Aug2021, Jinjing Li, Michael Zyphur, Patrick J. Laub, George Sugihara, Edoardo Tescari
+*! version 1.6.2, 26Aug2021, Jinjing Li, Michael Zyphur, Patrick J. Laub, George Sugihara, Edoardo Tescari
 *! contact: <jinjing.li@canberra.edu.au> or <patrick.laub@unimelb.edu.au>
 
-global EDM_VERSION = "1.6.1"
+global EDM_VERSION = "1.6.2"
 /* Empirical dynamic modelling
 
 Version history:
@@ -263,10 +263,10 @@ program define edmPreprocessVariable, rclass
 	else if substr("`1'", 1, 2) == "i." {  // treat as a factor variable
 		local factor_var = "1"
 		local varname = substr("`1'", 3, .)
-		qui gen double `out' = `varname'
+		qui gen double `out' = `varname' if `touse'
 	}
 	else {
-		qui gen double `out' = `1'
+		qui gen double `out' = `1' if `touse'
 	}
 	return local factor_var = "`factor_var'"
 end
@@ -281,59 +281,6 @@ program define edmManifoldSize, rclass
 	return local manifold_size = `num_xs' + `num_dts' + `total_num_extras'
 end
 
-program define edmConstructManifolds, rclass
-	syntax anything , x(name) touse(name) [dt_value(name)] ///
-			[z_vars(string)] [z_e_varying_count(real 0)] ///
-			max_e(int) tau(int) dt(int) dt0(int) [dtw(real 0)]
-
-	// Generate lags for 'x' data
-	local manifold_index = 0
-	forvalues i=0/`=`max_e'-1' {
-		local x_`i' = "``++manifold_index''"
-		qui gen double `x_`i'' = l`=`i'*`tau''.`x' if `touse'
-	}
-
-	// Generate lags for the 'dt' if requested
-	if `dt' {
-		forvalues i=`=(1 - `dt0')'/`=`max_e'-1' {
-			local t_`i' = "``++manifold_index''"
-			qui gen double `t_`i'' = `=cond(`i'==0, "f", "l`=`i'-1'")'.`dt_value' * `dtw' if `touse'
-		}
-	}
-
-	// Generate the lagged extra variables and then the unlagged extras
-	local z_count = wordcount("`z_vars'")
-	forvalues k=1/`z_count' {
-
-		local z_k : word `k' of `z_vars'
-		local z_k_varying = (`k' <= `z_e_varying_count')
-
-		forvalues i=0/`=`z_k_varying'*(`max_e'-1)' {
-			local z_`k'_`i' = "``++manifold_index''"
-			qui gen double `z_`k'_`i'' = l`=`i'*`tau''.`z_k' if `touse'
-		}
-	}
-
-	// Put the manifolds together
-	forvalues i=1/`=`max_e'-1' {
-		forvalues j=0/`i' {
-			local mapping_`i' = "`mapping_`i'' `x_`j''"
-		}
-		forvalues j=0/`i' {
-			local mapping_`i' = "`mapping_`i'' `t_`j''"
-		}
-
-		forvalues k=1/`z_count' {
-			forvalues j=0/`i' {
-				local mapping_`i' = "`mapping_`i'' `z_`k'_`j''"
-			}
-		}
-		return local mapping_`i' = "`mapping_`i''"
-	}
-
-	local max_e_manifold = strtrim("`mapping_`=`max_e'-1''")
-	return local max_e_manifold = "`max_e_manifold'"
-end
 
 program define edmCountExtras, rclass
 	syntax [anything]
@@ -467,10 +414,10 @@ program define edmExplore, eclass
 			[REPlicate(integer 1)] [seed(integer 0)] [ALGorithm(string)] [tau(integer 1)] [DETails] ///
 			[PRedict(name)] [CROSSfold(integer 0)] [CI(integer 0)] [Predictionhorizon(string)] ///
 			[COPredict(name)] [copredictvar(string)] [full] [force] [strict] [EXTRAembed(string)] ///
-			[ALLOWMISSing] [MISSINGdistance(real 0)] [dt] [DTWeight(real 0)] [DTSave(name)] ///
+			[ALLOWMISSing] [MISSINGdistance(real 0)] [dt] [reldt] [DTWeight(real 0)] [DTSave(name)] ///
 			[reportrawe] [CODTWeight(real 0)] [dot(integer 1)] [mata] [nthreads(integer 0)] ///
-			[saveinputs(string)] [verbosity(integer 1)] [olddt] [aspectratio(real 1)] ///
-			[distance(string)] [metrics(string)] [idw(real 0)] [cumdt(integer 0)] [wassdt(integer 1)]
+			[savemanifold(name)] [saveinputs(string)] [verbosity(integer 1)] [olddt] [aspectratio(real 1)] ///
+			[distance(string)] [metrics(string)] [idw(real 0)] [wassdt(integer 1)]
 
 	if ("`strict'" != "strict") {
 		local force = "force"
@@ -596,11 +543,12 @@ program define edmExplore, eclass
 		}
 	}
 
-	local parsed_dt = ("`dt'" == "dt") | ("`olddt'" == "olddt")
+	local parsed_dt = ("`dt'" == "dt") | ("`olddt'" == "olddt") | ("`reldt'" == "reldt")
+	local parsed_reldt = ("`reldt'" == "reldt")
 	local parsed_dt0 = ("`olddt'" != "olddt")
 	local parsed_dtw = "`dtweight'"
 
-	if "`dtsave'" != ""{
+	if "`dtsave'" != "" {
 		confirm new variable `dtsave'
 	}
 	local parsed_dtsave = "`dtsave'"
@@ -618,108 +566,44 @@ program define edmExplore, eclass
 	marksample touse
 	markout `touse' `timevar' `panel_id'
 
+	sum `touse', meanonly
+	local num_touse = r(sum)
+
 	tempvar x
 	edmPreprocessVariable "`1'", touse(`touse') out(`x')
 
-	if `parsed_dt' {
-		/* general algorithm for generating t patterns
-		1. keep only touse
-		2. drop all missings
-		3. regenerate t
-		4. generate oldt_pattern
-		 */
-		qui {
-			preserve
-			keep if `touse'
-			if !`allow_missing_mode' {
-				keep if `x' != .
-			}
-			xtset
-			local original_t = r(timevar)
-
-			if "`=r(panelvar)'" == "." {
-				local original_id = ""
-				local byori =""
-			}
-			else {
-				local original_id = r(panelvar)
-				local byori ="by `original_id': "
-				/* keep if `original_id' !=. */
-			}
-			tempvar newt
-			sort `original_id' `original_t'
-			`byori' gen `newt' = _n
-			if "`original_id'" != ""{
-				xtset `original_id' `newt'
-			}
-			else {
-				tsset `newt'
-			}
-
-			tempvar dt_value
-			qui gen double `dt_value' = d.`original_t'
-			keep `original_id' `original_t' `newt' `dt_value'
-			/* assert `original_id' !=. & `original_t' !=. */
-			tempfile updatedt_main
-			save `updatedt_main'
-			restore
-
-			// update copredict mainfold
-			if "`copredictvar'" != "" {
-				preserve
-				keep if `touse'
-				// this part is for filtering only
-				if !`allow_missing_mode' {
-					tempvar co_x_new
-					edmPreprocessVariable "`copredictvar'", touse(`touse') out(`co_x_new')
-					keep if `co_x_new' !=.
-				}
-
-				tempvar newt_co
-				sort `original_id' `original_t'
-				`byori' gen `newt_co' = _n
-				if "`original_id'" != ""{
-					qui xtset `original_id' `newt_co'
-				}
-				else {
-					qui tsset `newt_co'
-				}
-
-				tempvar dt_value_co
-				gen double `dt_value_co' = d.`original_t'
-
-				keep `original_id' `original_t' `newt_co' `dt_value_co'
-				tempfile updatedt_co
-				save `updatedt_co'
-				restore
-			}
-
-			merge m:1 `original_id' `original_t' using `updatedt_main', assert(master match) nogen
-			if "`copredictvar'" != "" {
-				merge m:1 `original_id' `original_t' using `updatedt_co', assert(master match) nogen
-			}
-
-			sort `original_id' `newt'
-			if "`original_id'" != ""{
-				qui xtset `original_id' `newt'
-			}
-			else {
-				qui tsset `newt'
-			}
-			if !inlist("`parsed_dtsave'","",".") {
-				clonevar `parsed_dtsave' = `dt_value'
-				qui label variable `parsed_dtsave' "Time delta (`original_t')"
-			}
-		}
+	if "`copredictvar'" != "" {
+		* build prediction manifold
+		tokenize "`copredictvar'"
+		tempvar co_x
+		edmPreprocessVariable "`1'", touse(`touse') out(`co_x')
 	}
 
-	// Get the vector of values which we'll try to predict
-	tempvar x_f
-	tsunab future_x : f(`predictionhorizon').`x'
-	qui gen double `x_f' = `future_x' if `touse'
+	if `mata_mode' & `parsed_dt' {
+		tempvar dt0_value dt_value
+		qui gen `dt0_value' = .
+		qui gen `dt_value' = .
+		mata: calculate_dt("`timevar'", "`x'", "`panel_id'", `allow_missing_mode', `tau', `predictionhorizon', ///
+				"`dt0_value'", "`dt_value'")
+
+
+		if "`copredictvar'" != "" {
+			tempvar co_dt0_value co_dt_value
+			qui gen `co_dt0_value' = .
+			qui gen `co_dt_value' = .
+			mata: calculate_dt("`timevar'", "`co_x'", "`panel_id'", `allow_missing_mode', `tau', `predictionhorizon', ///
+					"`co_dt0_value'", "`co_dt_value'")
+		}
+
+		if !inlist("`parsed_dtsave'","",".") {
+			qui clonevar `parsed_dtsave' = `dt_value'
+			qui label variable `parsed_dtsave' "Time delta (`timevar')"
+		}
+
+	}
 
 	// Calculate the default value for 'dtweight'
-	if `parsed_dt' {
+	if `mata_mode' & `parsed_dt' {
 		if `parsed_dtw' == 0 {
 			qui sum `x' if `touse'
 			local xsd = r(sd)
@@ -731,16 +615,9 @@ program define edmExplore, eclass
 				local parsed_dtw = 0
 				local parsed_dt = 0
 				local parsed_dt0 = 0
+				local parsed_dtsave = ""
 			}
 		}
-	}
-
-	if !`parsed_dt' {
-		tempvar before_tsfill
-		qui tsset
-		qui gen `before_tsfill' = 1
-		qui tsfill
-		qui replace `touse' = 0 if !`before_tsfill'
 	}
 
 	edmCountExtras `extraembed'
@@ -768,7 +645,7 @@ program define edmExplore, eclass
 	numlist "`theta'"
 	local theta_size = wordcount("`=r(numlist)'")
 	local round = max(`crossfold', `replicate')
-	
+
 	local task_num = 1
 	local num_tasks = `round'*`theta_size'*`e_size'
 	mat r = J(`num_tasks', 4, .)
@@ -784,23 +661,13 @@ program define edmExplore, eclass
 	local total_num_extras = `r(total_num_extras)'
 
 	if `mata_mode' {
-		local manifold_vars = ""
-		forvalues i = 1/`manifold_size' {
-			tempvar manifold_var
-			local manifold_vars = "`manifold_vars' `manifold_var'"
-		}
-		edmConstructManifolds `manifold_vars' , x(`x') touse(`touse') dt_value(`dt_value') ///
-			z_vars("`z_vars'") z_e_varying_count(`z_e_varying_count') ///
-			max_e(`max_e') tau(`tau') dt(`parsed_dt') dt0(`parsed_dt0') dtw(`parsed_dtw')
-
-		forvalues i=1/`=`max_e'-1' {
-			local mapping_`i' = "`r(mapping_`i')'"
-		}
-		local max_e_manifold = "`r(max_e_manifold)'"
+		mata: construct_manifold("`touse'", "`panel_id'", "`x'", "`timevar'", "`z_vars'", "`x'", ///
+			`z_count', `z_e_varying_count', `parsed_dt', `parsed_reldt', `parsed_dtw', ///
+			`max_e', `tau', `predictionhorizon', `allow_missing_mode', 0)
 	}
 
 	// Choose which rows of the manifold we will use for the analysis
-	// (this mainly depends on whether we're keeping or discarding rows 
+	// (this mainly depends on whether we're keeping or discarding rows
 	// with some missing values).
 	tempvar usable
 
@@ -825,72 +692,43 @@ program define edmExplore, eclass
 
 	// Default value for 'missingdistance'
 	if `mata_mode' & `allow_missing_mode' & `missingdistance' <= 0 {
-		qui sum `x' if `usable'
+		qui sum `x' if `touse'
 		local missingdistance = 2/sqrt(c(pi))*r(sd)
 	}
 
 	if "`copredictvar'" != "" {
-		// temporary move to newt_co
-		if `parsed_dt' {
-			if "`original_id'" != ""{
-				qui xtset `original_id' `newt_co'
-			}
-			else {
-				qui tsset `newt_co'
-			}
-		}
-
 		confirm new variable `copredict'
 		tempvar co_train_set co_predict_set
 
 		* build prediction manifold
-		tokenize "`copredictvar'"
-		tempvar co_x
-		edmPreprocessVariable "`1'", touse(`touse') out(`co_x')
-
 		* z list
 		local co_z_vars = "`z_vars'"
 		local co_z_e_varying_count = `z_e_varying_count'
 
-		// note: there are issues in recalculating the codtweight as the variable usable are not generated in the same way as cousable
-		local codtweight = cond(`parsed_dt' & `codtweight' == 0, `parsed_dtw', 0)
+		if `mata_mode' {
+			// note: there are issues in recalculating the codtweight as the variable usable are not generated in the same way as cousable
+			local codtweight = cond(`parsed_dt' & `codtweight' == 0, `parsed_dtw', 0)
 
-		local co_manifold_vars = ""
-		forvalues i = 1/`manifold_size' {
-			tempvar co_manifold_var
-			local co_manifold_vars = "`co_manifold_vars' `co_manifold_var'"
-		}
-		edmConstructManifolds `co_manifold_vars' , x(`co_x') touse(`touse') dt_value(`dt_value_co') ///
-			z_vars("`co_z_vars'") z_e_varying_count(`co_z_e_varying_count') ///
-			max_e(`max_e') tau(`tau') dt(`parsed_dt') dt0(`parsed_dt0') dtw(`codtweight')
+			mata: construct_manifold("`touse'", "`panel_id'", "`co_x'", "`timevar'", "`co_z_vars'", "`co_x'", ///
+				`z_count', `z_e_varying_count', `parsed_dt', `parsed_reldt', `codtweight', ///
+				`max_e', `tau', `predictionhorizon', `allow_missing_mode', 1)
 
-		local co_mapping = "`r(max_e_manifold)'"
-
-		// Generate the same way as `usable', though don't insist on `x_f' being accessible.
-		tempvar co_usable
-		if `allow_missing_mode' {
-			qui gen byte `co_usable' = 0
-			foreach v of local co_mapping {
-				qui replace `co_usable' = 1 if `v' !=. & `touse'
-			}
-		}
-		else {
-			tempvar any_missing_in_co_manifold
-			hasMissingValues `co_mapping', out(`any_missing_in_co_manifold')
-			gen byte `co_usable' = `touse' & !`any_missing_in_co_manifold'
-		}
-
-		gen byte `co_train_set' = `co_usable'
-		gen byte `co_predict_set' = `co_usable'
-
-		//restore t
-		if `parsed_dt' {
-			if "`original_id'" != ""{
-				qui xtset `original_id' `newt'
+			// Generate the same way as `usable', though don't insist on `x_f' being accessible.
+			tempvar co_usable
+			if `allow_missing_mode' {
+				qui gen byte `co_usable' = 0
+				foreach v of local co_mapping {
+					qui replace `co_usable' = 1 if `v' !=. & `touse'
+				}
 			}
 			else {
-				qui tsset `newt'
+				tempvar any_missing_in_co_manifold
+				hasMissingValues `co_mapping', out(`any_missing_in_co_manifold')
+				gen byte `co_usable' = `touse' & !`any_missing_in_co_manifold'
 			}
+
+			gen byte `co_train_set' = `co_usable'
+			gen byte `co_predict_set' = `co_usable'
 		}
 	}
 
@@ -899,6 +737,7 @@ program define edmExplore, eclass
 		// Setup variables which the plugin will modify
 		scalar plugin_finished = 0
 		local missing_dist_used = .
+		local dtw_used = .
 
 		// The plugin will save the 'usable' it generates to to here
 		qui gen double `usable' = .
@@ -907,19 +746,62 @@ program define edmExplore, eclass
 		local full_mode = ("`full'" == "full")
 		local copredict_mode = ("`copredictvar'" != "")
 
+		if `copredict_mode' {
+			local co_xvar = "`co_x'"
+
+			tempvar co_train_set co_predict_set
+			// TODO: Needs fixing here
+			qui gen byte `co_train_set' = `touse'
+			qui gen byte `co_predict_set' = `touse'
+
+		}
+		else {
+			local co_xvar = ""
+			local co_train_set = ""
+			local co_predict_set = ""
+		}
+
 		// Can't pass the c(rngstate) directly to the plugin as a function argument as it is too long.
 		// Instead, just save it as a local and have the plugin read it using the Stata C API.
-		local rngstate = c(rngstate)
-		mata: st_local("next_rv", strofreal( runiform(1, 1) ) )
-		set rngstate `rngstate'
+		local originalRNG = "`c(rng)'"
+		if ("`originalRNG'" != "default") | ("`originalRNG'" != "mt64") {
+			set rng mt64
+		}
 
-		plugin call edm_plugin `timevar' `x' `x_f' `z_vars' `touse' `usable' `co_x' `co_train_set' `co_predict_set' `panel_id', "launch_edm_tasks" ///
-				"`z_count'" "`parsed_dt'" "`parsed_dt0'" "`parsed_dtw'" "`algorithm'" "`force'" "`missingdistance'" ///
+		local rngstate = c(rngstate)
+
+		if "`parsed_dtsave'" != "" {
+			qui gen double `parsed_dtsave' = .
+		}
+
+		local manifold_vars = ""
+
+		if "`savemanifold'" != "" {
+			forvalues ii=1/`manifold_size' {
+				cap gen double `savemanifold'_`ii' = .
+				if _rc!=0 {
+					di as error "Cannot save the manifold using variable `savemanifold'_`ii' - is the prefix used already?"
+					exit(100)
+				}
+				local manifold_vars = "`manifold_vars' `savemanifold'_`ii'"
+			}
+		}
+
+		plugin call edm_plugin `timevar' `x' `x' `z_vars' `usable' `co_xvar' `co_train_set' `co_predict_set' `panel_id' `parsed_dtsave' `manifold_vars' if `touse', "launch_edm_tasks" ///
+				"`z_count'" "`parsed_dt'" "`parsed_dt0'" "`dtweight'" "`algorithm'" "`force'" "`missingdistance'" ///
 				"`nthreads'" "`verbosity'" "`num_tasks'" "`explore_mode'" "`full_mode'" "`crossfold'" "`tau'" ///
-				"`max_e'" "`allow_missing_mode'" "`next_rv'" "`theta'" "`aspectratio'"  "`distance'" "`metrics'" ///
-				"`copredict_mode'" "`cmdline'" "`z_e_varying_count'" "`idw'" "`ispanel'" "`cumdt'" "`wassdt'"
+				"`max_e'" "`allow_missing_mode'" "`theta'" "`aspectratio'"  "`distance'" "`metrics'" ///
+				"`copredict_mode'" "`cmdline'" "`z_e_varying_count'" "`idw'" "`ispanel'" "`parsed_reldt'" "`wassdt'" "`predictionhorizon'"
 
 		local missingdistance = `missing_dist_used'
+
+		if `parsed_dt' {
+			local parsed_dtw = `dtw_used'
+			if `dtw_used' < 0 {
+				local parsed_dt = 0
+			}
+		}
+
 		qui compress `usable'
 	}
 
@@ -929,17 +811,19 @@ program define edmExplore, eclass
 		qui gen double `x_p' = .
 	}
 
-	qui count if `usable'
-	local num_usable = r(N)
+	sum `usable', meanonly
+	local num_usable = r(sum)
 
 	if `crossfold' > 0 {
 		if `crossfold' > `num_usable' / `max_e' {
 			di as error "Not enough observations for cross-validations"
 			error 149
 		}
-		tempvar crossfoldu crossfoldunum
-		qui gen double `crossfoldu' = runiform() if `usable'
-		qui egen `crossfoldunum'= rank(`crossfoldu'), unique
+		if `mata_mode' {
+			tempvar crossfoldu crossfoldunum
+			qui gen double `crossfoldu' = runiform() if `usable'
+			qui egen `crossfoldunum'= rank(`crossfoldu'), unique
+		}
 	}
 
 	if `num_usable' == 0 | (`num_usable' == 1 & "`full'" != "full") | (`crossfold' > 0 & `num_usable' < `crossfold') {
@@ -966,13 +850,31 @@ program define edmExplore, eclass
 		tempvar u
 	}
 
-	forvalues t=1/`round' {
+	if !`mata_mode' {
+		// Count how many random numbers that the plugin will have used
+		if (`crossfold' > 0) {
+			local numRVs = `num_usable'
+		}
+		else {
+			if ("`full'" != "full") {
+				local numRVs = `num_usable' * `round'
+			}
+			else {
+				local numRVs = 0
+			}
+		}
 
-		local newTrainPredictSplit = 1
+		// Burn through them in the Stata RNG so that both streams are synchronised
+		mata: burn_rvs(`numRVs')
+
+		set rng `originalRNG'
+	}
+
+	forvalues t=1/`round' {
 
 		// Generate some random numbers (if we're in a mode which needs them
 		// to separate the testing and prediction sets.)
-		if `crossfold' == 0 & "`full'" != "full" {
+		if `mata_mode' & `crossfold' == 0 & "`full'" != "full" {
 			if `t' == 1 {
 				qui gen double `u' = runiform() if `usable'
 			}
@@ -1050,43 +952,34 @@ program define edmExplore, eclass
 
 			foreach j of numlist `theta' {
 
-				local save_prediction = ("`predict'" != "") & ((`crossfold' > 0)  | (`task_num' == `num_tasks'))
-
 				mat r[`task_num',1] = `current_e'
 				mat r[`task_num',2] = `j'
 
 				if `mata_mode' {
 					local savesmap_vars ""
-					break mata: smap_block("``manifold''", "", "`x_f'", "`x_p'","`train_set'","`predict_set'",`j',`lib_size',"`algorithm'", "`savesmap_vars'","`force'", `missingdistance')
+					break mata: smap_block("``manifold''", "", "`x_f'", "`x_p'", "`train_set'", "`predict_set'", ///
+						`j', `lib_size', "`algorithm'", "`savesmap_vars'", "`force'", `missingdistance', ///
+						`idw', "`panel_id'", `i', ///
+						`total_num_extras', `z_e_varying_count', "`z_factor_var'")
 
-					qui corr `x_f' `x_p' if `predict_set'
+					cap corr `x_f' `x_p' if `predict_set'
 					mat r[`task_num',3] = r(rho)
 
 					tempvar mae
 					qui gen double `mae' = abs(`x_p' - `x_f') if `predict_set'
 					qui sum `mae'
 					drop `mae'
-					mat r[`task_num',4] = r(mean)
+					mat r[`task_num', 4] = r(mean)
+					if r(mean) < 1e-8 {
+						mat r[`task_num', 4] = 0
+					}
 
-					if `save_prediction' {
+					if ("`predict'" != "") & ((`crossfold' > 0)  | (`task_num' == `num_tasks')) {
 						cap replace `predict' = `x_p' if `x_p' !=.
 					}
 				}
 
 				local ++task_num
-			}
-
-			if !`mata_mode' {
-				// PJL: Check we never save SMAP coeffs in explore mode.
-				local save_smap_coeffs = 0
-				if `k' >= 0 {
-					local k_adj = `lib_size'
-				}
-				else {
-					local k_adj = `k'
-				}
-
-				local newTrainPredictSplit = 0
 			}
 		}
 
@@ -1106,16 +999,30 @@ program define edmExplore, eclass
 		}
 	}
 
-	if "`copredictvar'" != "" {
-		tempvar co_x_p
-		qui gen double `co_x_p'=.
-
-		if `mata_mode' {
-			qui replace `co_train_set' = 0 if `usable' == 0
-			break mata: smap_block("``manifold''", "`co_mapping'", "`x_f'", "`co_x_p'","`co_train_set'","`co_predict_set'",`theta',`lib_size',"`algorithm'", "","`force'",`missingdistance')
+	// Save the manifold back to Stata if requested.
+	if `mata_mode' & "`savemanifold'" !="" {
+		local counter = 1
+		foreach v of varlist ``manifold'' {
+			cap gen double `savemanifold'`direction_num'_`counter' = `v'
+			if _rc!=0 {
+				di as error "Cannot save the manifold using variable `savemanifold'`direction_num'_`counter' - is the prefix used already?"
+				exit(100)
+			}
+			local ++counter
 		}
 	}
 
+	if "`copredictvar'" != "" {
+		tempvar co_x_p
+		qui gen double `co_x_p' = .
+
+		if `mata_mode' {
+			qui replace `co_train_set' = 0 if `usable' == 0
+			break mata: smap_block("``manifold''", "`co_mapping'", "`x_f'", "`co_x_p'", "`co_train_set'", "`co_predict_set'", ///
+				`theta', `lib_size', "`algorithm'", "", "`force'", `missingdistance', `idw', "`panel_id'", `current_e', ///
+				`total_num_extras', `z_e_varying_count', "`z_factor_var'")
+		}
+	}
 
 	// Collect all the asynchronous predictions from the plugin
 	if `mata_mode' == 0 {
@@ -1123,7 +1030,7 @@ program define edmExplore, eclass
 		local result_matrix = "r"
 		local save_predict_mode = ("`predict'" != "")
 		local save_copredict_mode = ("`copredictvar'" != "")
-		plugin call edm_plugin `predict' `co_x_p', "collect_results" "`result_matrix'" "`save_predict_mode'" "`save_copredict_mode'"
+		plugin call edm_plugin `predict' `co_x_p' if `touse', "collect_results" "`result_matrix'" "`save_predict_mode'" "`save_copredict_mode'"
 	}
 
 	if ("`copredictvar'" != "") {
@@ -1131,20 +1038,14 @@ program define edmExplore, eclass
 		qui label variable `copredict' "edm copredicted `copredictvar' using manifold `ori_x'"
 	}
 
-	/* mat r = r[2...,.] */
-	if !`parsed_dt' {
-		qui keep if `before_tsfill' != .
-		drop `before_tsfill'
-	}
-
 	mat cfull = r[1,3]
 	local cfullname= subinstr("`ori_x'",".","/",.)
 	matrix colnames cfull = `cfullname'
 	matrix rownames cfull = rho
-	/* mat list cfull */
-	ereturn post cfull, esample(`usable')
-	ereturn scalar N = `num_usable'
-	/* ereturn post r, esample(`usable') dep("`y'") properties("r") */
+
+	ereturn post cfull, esample(`touse')
+	ereturn scalar N = `num_touse'
+
 	ereturn local subcommand = "explore"
 	ereturn local direction = "oneway"
 	ereturn scalar e_offset = `e_offset'
@@ -1193,14 +1094,6 @@ program define edmExplore, eclass
 		ereturn local extraembed = "`z_names'"
 	}
 	if ("`dt'" == "dt") | ("`olddt'" == "olddt") {
-		sort `original_id' `original_t'
-		qui xtset `original_id' `original_t'
-		if "`original_id'" != ""{
-			qui xtset `original_id' `original_t'
-		}
-		else {
-			qui tsset `original_t'
-		}
 		if `parsed_dt' ==0 {
 			ereturn local cmdfootnote "`cmdfootnote'Note: dt option is ignored due to lack of variations in time delta"
 		}
@@ -1215,10 +1108,10 @@ program define edmXmap, eclass
 			[k(integer 0)] [ALGorithm(string)] [tau(integer 1)] [REPlicate(integer 1)] ///
 			[SAVEsmap(string)] [DETails] [DIrection(string)] [PRedict(name)] [CI(integer 0)] ///
 			[Predictionhorizon(string)] [COPredict(name)] [copredictvar(string)] [force] [strict] [EXTRAembed(string)] ///
-			[ALLOWMISSing] [MISSINGdistance(real 0)] [dt] [DTWeight(real 0)] [DTSave(name)] ///
+			[ALLOWMISSing] [MISSINGdistance(real 0)] [dt] [reldt] [DTWeight(real 0)] [DTSave(name)] ///
 			[oneway] [savemanifold(name)] [CODTWeight(real 0)] [dot(integer 1)] [mata] ///
 			[nthreads(integer 0)] [saveinputs(string)] [verbosity(integer 1)] [olddt] ///
-			[aspectratio(real 1)] [distance(string)] [metrics(string)] [idw(real 0)] [cumdt(integer 0)]
+			[aspectratio(real 1)] [distance(string)] [metrics(string)] [idw(real 0)]
 
 	if ("`strict'" != "strict") {
 		local force = "force"
@@ -1398,7 +1291,8 @@ program define edmXmap, eclass
 		}
 	}
 
-	local parsed_dt = ("`dt'" == "dt") | ("`olddt'" == "olddt")
+	local parsed_dt = ("`dt'" == "dt") | ("`olddt'" == "olddt") | ("`reldt'" == "reldt")
+	local parsed_reldt = ("`reldt'" == "reldt")
 	local parsed_dt0 = ("`olddt'" != "olddt")
 
 	if "`dtsave'" != ""{
@@ -1421,6 +1315,9 @@ program define edmXmap, eclass
 	markout `touse' `timevar' `panel_id'
 	sort `panel_id' `timevar'
 
+	sum `touse', meanonly
+	local num_touse = r(sum)
+
 	* create manifold as variables
 	tokenize "`anything'"
 
@@ -1437,6 +1334,11 @@ program define edmXmap, eclass
 	tempvar x y
 	edmPreprocessVariable "`1'", touse(`touse') out(`x')
 	edmPreprocessVariable "`2'", touse(`touse') out(`y')
+
+	if "`copredictvar'" != "" {
+		tempvar co_x
+		edmPreprocessVariable "`copredictvar'", touse(`touse') out(`co_x')
+	}
 
 	edmCountExtras `extraembed'
 	local z_count = `r(z_count)'
@@ -1477,116 +1379,25 @@ program define edmXmap, eclass
 
 		local parsed_dtw = "`dtweight'"
 
-		if `parsed_dt' {
-			/* general algorithm for generating t patterns
-			1. keep only touse
-			2. drop all missings
-			3. regenerate t
-			4. generate oldt_pattern
-			*/
-			qui {
-				// update main mainfold
-				preserve
-				keep if `touse'
-				if !`allow_missing_mode' {
-					keep if `x' != .
-				}
-				qui xtset
-				local original_t = r(timevar)
-				if "`=r(panelvar)'" == "." {
-					local original_id = ""
-					local byori =""
-				}
-				else {
-					local original_id = r(panelvar)
-					local byori ="by `original_id': "
-				}
-				tempvar newt
-				sort `original_id' `original_t'
-				`byori' gen `newt' = _n
-				if "`original_id'" != ""{
-					qui xtset `original_id' `newt'
-				}
-				else {
-					qui tsset `newt'
-				}
-
-				tempvar dt_value
-				gen double `dt_value' = d.`original_t'
-				keep `original_id' `original_t' `newt' `dt_value'
-				tempfile updatedt_main
-				save `updatedt_main'
-				restore
-
-				// update copredict mainfold
-				if "`copredictvar'" != "" {
-					preserve
-					keep if `touse'
-					// this part is for filtering only
-					if !`allow_missing_mode' {
-						tempvar co_x_new
-						edmPreprocessVariable "`copredictvar'", touse(`touse') out(`co_x_new')
-						keep if `co_x_new' !=.
-					}
-					tempvar newt_co
-					sort `original_id' `original_t'
-					`byori' gen `newt_co' = _n
-					if "`original_id'" != ""{
-						qui xtset `original_id' `newt_co'
-					}
-					else {
-						qui tsset `newt_co'
-					}
-
-					tempvar dt_value_co
-					gen double `dt_value_co' = d.`original_t'
-					/* sum `dt_value_co' */
-					keep `original_id' `original_t' `newt_co' `dt_value_co'
-					tempfile updatedt_co
-					save `updatedt_co'
-					restore
-				}
-
-				merge m:1 `original_id' `original_t' using `updatedt_main', assert(master match) nogen
-				if "`copredictvar'" != "" {
-					merge m:1 `original_id' `original_t' using `updatedt_co', assert(master match) nogen
-				}
-				/* tempvar mergevar
-				merge m:1 `original_id' `original_t' using `updatedt_main', assert(master match) gen(`mergevar')
-
-				noi {
-
-					tab `mergevar'
-
-					if "`original_id'" !="" {
-						assert `mergevar' ==3 if  `original_t'!=. & `original_id'!=. & `touse' & `x' !=.
-					}
-					else {
-						assert `mergevar' ==3 if  `original_t'!=. & `touse'  & `x' !=.
-					}
-
-				}
-
-				drop `mergevar'
-				*/
-				/* merge m:1 `original_id' `original_t' using `updatedt_main', assert(master match)  */
-				/* tab _merge */
-
-
-				sum `original_t' `newt'
-				sort `original_id' `newt'
-				if "`original_id'" != ""{
-					qui xtset `original_id' `newt'
-				}
-				else {
-					qui tsset `newt'
-				}
-				if !inlist("`parsed_dtsave'","",".") {
-					clonevar `parsed_dtsave' = `dt_value'
-					qui label variable `parsed_dtsave' "Time delta (`original_t')"
-				}
+		if `mata_mode' & `parsed_dt' {
+			tempvar dt0_value dt_value
+			qui gen `dt0_value' = .
+			qui gen `dt_value' = .
+			mata: calculate_dt("`timevar'", "`x'", "`panel_id'", `allow_missing_mode', `tau', `predictionhorizon', ///
+					"`dt0_value'", "`dt_value'")
+			pause
+			if "`copredictvar'" != "" {
+				tempvar co_dt0_value co_dt_value
+				qui gen `co_dt0_value' = .
+				qui gen `co_dt_value' = .
+				mata: calculate_dt("`timevar'", "`co_x'", "`panel_id'", `allow_missing_mode', `tau', `predictionhorizon', ///
+						"`co_dt0_value'", "`co_dt_value'")
 			}
 
+			if !inlist("`parsed_dtsave'","",".") {
+				qui clonevar `parsed_dtsave' = `dt_value'
+				qui label variable `parsed_dtsave' "Time delta (`timevar')"
+			}
 		}
 
 		// To give both explore & xmap the same name for this variable:
@@ -1594,7 +1405,7 @@ program define edmXmap, eclass
 
 
 		// Calculate the default value for `dtweight'
-		if `parsed_dt' {
+		if `mata_mode' & `parsed_dt' {
 			if `parsed_dtw' == 0 {
 				qui sum `x' if `touse'
 				local xsd = r(sd)
@@ -1606,17 +1417,10 @@ program define edmXmap, eclass
 					local parsed_dtw = 0
 					local parsed_dt = 0
 					local parsed_dt0 = 0
+					local parsed_dtsave = ""
 				}
 			}
 			local parsed_dtw`direction_num' = `parsed_dtw'
-		}
-
-		if !`parsed_dt' & `direction_num' == 1 {
-			tempvar before_tsfill
-			qui tsset
-			qui gen `before_tsfill' = 1
-			qui tsfill
-			qui replace `touse' = 0 if !`before_tsfill'
 		}
 
 		edmManifoldSize, e(`max_e') dt(`parsed_dt') dt0(`parsed_dt0') ///
@@ -1625,25 +1429,10 @@ program define edmXmap, eclass
 		local total_num_extras = `r(total_num_extras)'
 
 		if `mata_mode' {
-			local manifold_vars = ""
-			forvalues i = 1/`manifold_size' {
-				tempvar manifold_var
-				local manifold_vars = "`manifold_vars' `manifold_var'"
-			}
-			edmConstructManifolds `manifold_vars' , x(`x') touse(`touse') dt_value(`dt_value') ///
-				z_vars("`z_vars'") z_e_varying_count(`z_e_varying_count') ///
-				max_e(`max_e') tau(`tau') dt(`parsed_dt') dt0(`parsed_dt0') dtw(`parsed_dtw')
-
-			forvalues i=1/`=`max_e'-1' {
-				local mapping_`i' = "`r(mapping_`i')'"
-			}
-			local max_e_manifold = "`r(max_e_manifold)'"
+			mata: construct_manifold("`touse'", "`panel_id'", "`x'", "`timevar'", "`z_vars'", "`y'", ///
+				`z_count', `z_e_varying_count', `parsed_dt', `parsed_reldt', `parsed_dtw', ///
+				`max_e', `tau', `predictionhorizon', `allow_missing_mode', 0)
 		}
-
-		// Get the vector of values which we'll try to predict
-		tempvar x_f
-		tsunab future_y : f(`predictionhorizon').`y'
-		qui gen double `x_f' = `future_y' if `touse'
 
 		// Select the rows which we'll use in the analysis
 		tempvar usable
@@ -1659,7 +1448,7 @@ program define edmXmap, eclass
 				qui replace `usable' = 0 if `x_f' == .
 
 				if `missingdistance' <= 0 {
-					qui sum `x' if `usable'
+					qui sum `x' if `touse'
 					local defaultmissingdist = 2/sqrt(c(pi))*r(sd)
 					local missingdistance`direction_num' = `defaultmissingdist'
 				}
@@ -1672,71 +1461,40 @@ program define edmXmap, eclass
 		}
 
 		if ("`copredictvar'" != "") & (`comap_constructed' == 0) {
-			// temporary move to newt_co
-			if `parsed_dt' {
-				qui {
-					if "`original_id'" != ""{
-						qui xtset `original_id' `newt_co'
-					}
-					else {
-						qui tsset `newt_co'
-					}
-				}
-			}
 			confirm new variable `copredict'
 			tempvar co_train_set co_predict_set
 
 			* build prediction manifold
-			tempvar co_x
-			edmPreprocessVariable "`copredictvar'", touse(`touse') out(`co_x')
-
 			* z list
 			local co_z_vars = "`z_vars'"
 			local co_z_e_varying_count = `z_e_varying_count'
 
-			// note: there are issues in recalculating the codtweight as the variable usable are not generated in the same way as co_usable
-			local codtweight = cond(`parsed_dt' & `codtweight' == 0, `parsed_dtw', 0)
+			if `mata_mode' {
+				// note: there are issues in recalculating the codtweight as the variable usable are not generated in the same way as co_usable
+				local codtweight = cond(`parsed_dt' & `codtweight' == 0, `parsed_dtw', 0)
 
-			local co_manifold_vars = ""
-			forvalues i = 1/`manifold_size' {
-				tempvar co_manifold_var
-				local co_manifold_vars = "`co_manifold_vars' `co_manifold_var'"
-			}
-			edmConstructManifolds `co_manifold_vars' , x(`co_x') touse(`touse') dt_value(`dt_value_co') ///
-				z_vars("`co_z_vars'") z_e_varying_count(`co_z_e_varying_count') ///
-				max_e(`max_e') tau(`tau') dt(`parsed_dt') dt0(`parsed_dt0') dtw(`codtweight')
+				mata: construct_manifold("`touse'", "`panel_id'", "`co_x'", "`timevar'", "`co_z_vars'", "`y'", ///
+					`z_count', `z_e_varying_count', `parsed_dt', `parsed_reldt', `codtweight', ///
+					`max_e', `tau', `predictionhorizon', `allow_missing_mode', 1)
 
-			local co_mapping = "`r(max_e_manifold)'"
-
-			// Generate the same way as `usable', though don't insist on `x_f' being accessible.
-			tempvar co_usable
-			if `allow_missing_mode' {
-				qui gen byte `co_usable' = 0
-				foreach v of local co_mapping {
-					qui replace `co_usable' = 1 if `v' !=. & `touse'
-				}
-			}
-			else {
-				tempvar any_missing_in_co_manifold
-				hasMissingValues `co_mapping', out(`any_missing_in_co_manifold')
-				gen byte `co_usable' = `touse' & !`any_missing_in_co_manifold'
-			}
-
-			gen byte `co_train_set' = `co_usable'
-			gen byte `co_predict_set' = `co_usable'
-
-			local comap_constructed = 1
-
-			//restore t
-			if `parsed_dt' {
-				qui {
-					if "`original_id'" != ""{
-						xtset `original_id' `newt'
-					}
-					else {
-						tsset `newt'
+				// Generate the same way as `usable', though don't insist on `x_f' being accessible.
+				tempvar co_usable
+				if `allow_missing_mode' {
+					qui gen byte `co_usable' = 0
+					foreach v of local co_mapping {
+						qui replace `co_usable' = 1 if `v' !=. & `touse'
 					}
 				}
+				else {
+					tempvar any_missing_in_co_manifold
+					hasMissingValues `co_mapping', out(`any_missing_in_co_manifold')
+					gen byte `co_usable' = `touse' & !`any_missing_in_co_manifold'
+				}
+
+				gen byte `co_train_set' = `co_usable'
+				gen byte `co_predict_set' = `co_usable'
+
+				local comap_constructed = 1
 			}
 		}
 
@@ -1744,6 +1502,7 @@ program define edmXmap, eclass
 			// Setup variables which the plugin will modify
 			scalar plugin_finished = 0
 			local missing_dist_used = .
+			local dtw_used = .
 
 			// The plugin will save the 'usable' it generates to to here
 			qui gen double `usable' = .
@@ -1754,27 +1513,61 @@ program define edmXmap, eclass
 
 			local copredict_mode = ("`copredictvar'" != "") & (`direction_num' == `num_directions')
 
-			// Can't pass the c(rngstate) directly to the plugin as a function argument as it is too long.
-			// Instead, just save it as a local and have the plugin read it using the Stata C API.
-			local rngstate = c(rngstate)
-			mata: st_local("next_rv", strofreal( runiform(1, 1) ) )
-			set rngstate `rngstate'
-
 			if `copredict_mode' {
 				local co_xvar = "`co_x'"
+
+				tempvar co_train_set co_predict_set
+				// TODO: Needs fixing here
+				qui gen byte `co_train_set' = `touse'
+				qui gen byte `co_predict_set' = `touse'
+
 			}
 			else {
 				local co_xvar = ""
+				local co_train_set = ""
+				local co_predict_set = ""
 			}
 
+			// Can't pass the c(rngstate) directly to the plugin as a function argument as it is too long.
+			// Instead, just save it as a local and have the plugin read it using the Stata C API.
+			local originalRNG = "`c(rng)'"
+			if ("`originalRNG'" != "default") | ("`originalRNG'" != "mt64") {
+				set rng mt64
+			}
 
-			plugin call edm_plugin `timevar' `x' `x_f' `z_vars' `touse' `usable' `co_xvar' `co_train_set' `co_predict_set' `panel_id', "launch_edm_tasks" ///
-					"`z_count'" "`parsed_dt'" "`parsed_dt0'" "`parsed_dtw'" "`algorithm'" "`force'" "`missingdistance'" ///
+			local rngstate = c(rngstate)
+
+			if "`parsed_dtsave'" != "" {
+				qui gen double `parsed_dtsave' = .
+			}
+
+			local manifold_vars = ""
+			if "`savemanifold'" != "" {
+				forvalues ii=1/`manifold_size' {
+					cap gen double `savemanifold'`direction_num'_`ii' = .
+					if _rc!=0 {
+						di as error "Cannot save the manifold using variable `savemanifold'`direction_num'_`ii' - is the prefix used already?"
+						exit(100)
+					}
+					local manifold_vars = "`manifold_vars' `savemanifold'`direction_num'_`ii'"
+				}
+			}
+
+			plugin call edm_plugin `timevar' `x' `y' `z_vars' `usable' `co_xvar' `co_train_set' `co_predict_set' `panel_id' `parsed_dtsave' `manifold_vars' if `touse', "launch_edm_tasks" ///
+					"`z_count'" "`parsed_dt'" "`parsed_dt0'" "`dtweight'" "`algorithm'" "`force'" "`missingdistance'" ///
 					"`nthreads'" "`verbosity'" "`num_tasks'" "`explore_mode'" "`full_mode'" "`crossfold'" "`tau'" ///
-					"`max_e'" "`allow_missing_mode'" "`next_rv'" "`theta'" "`aspectratio'" "`distance'" "`metrics'" ///
-					"`copredict_mode'" "`cmdline'" "`z_e_varying_count'" "`idw'" "`ispanel'" "`cumdt'" "`wassdt'"
+					"`max_e'" "`allow_missing_mode'" "`theta'" "`aspectratio'" "`distance'" "`metrics'" ///
+					"`copredict_mode'" "`cmdline'" "`z_e_varying_count'" "`idw'" "`ispanel'" "`parsed_reldt'" "`wassdt'" "`predictionhorizon'"
 
 			local missingdistance`direction_num' = `missing_dist_used'
+
+			if `parsed_dt' {
+				local parsed_dtw`direction_num' = `dtw_used'
+				if `dtw_used' < 0 {
+					local parsed_dt = 0
+				}
+			}
+
 			// Collect a list of all the variables created to store the SMAP coefficients
 			// across all the 'replicate's for this xmap direction.
 			local all_savesmap_vars = ""
@@ -1804,8 +1597,8 @@ program define edmXmap, eclass
 		}
 
 		// Set the default library size to be the number of usable observations.
-		qui count if `usable'
-		local num_usable = r(N)
+		sum `usable', meanonly
+		local num_usable = r(sum)
 
 		if "`l_ori'" == "" | "`l_ori'" == "0" {
 			local library = `num_usable'
@@ -1830,26 +1623,28 @@ program define edmXmap, eclass
 			}
 		}
 
+		if !`mata_mode' {
+			// Count how many random numbers that the plugin will have used
+			local numRVs = `num_usable' * `round' * `l_size'
+
+			// Burn through them in the Stata RNG so that both streams are synchronised
+			mata: burn_rvs(`numRVs')
+
+			set rng `originalRNG'
+		}
 
 		qui gen double `u' = .
 
 		forvalues rep = 1/`round' {
 
-			qui replace `u' = runiform() if `usable'
-
-			if `mata_mode' {
-				cap drop `urank'
-				qui egen double `urank' =rank(`u') if `usable', unique
-			}
-
 			foreach i of numlist `e' {
 				local manifold "mapping_`=`i'-1'"
 
 				foreach lib_size of numlist `library' {
-
-					local newTrainPredictSplit = 1
-
 					if `mata_mode' {
+						qui replace `u' = runiform() if `usable'
+						cap drop `urank'
+						qui egen double `urank' = rank(`u') if `usable', unique
 						qui replace `train_set' = `urank' <= `lib_size' & `usable'
 					}
 
@@ -1889,7 +1684,7 @@ program define edmXmap, eclass
 						qui label variable `savesmap'`direction_num'_b0_rep`rep' "constant in `xx' predicting `yy' S-map equation (rep `rep')"
 						local savesmap_vars "`savesmap'`direction_num'_b0_rep`rep'"
 
-						local mapping_name "`xx'" 
+						local mapping_name "`xx'"
 
 						forvalues ii=1/`=`e'-1' {
 							local mapping_name "`mapping_name' l`=`ii'*`tau''.`xx'"
@@ -1924,10 +1719,9 @@ program define edmXmap, eclass
 							local savesmap_vars "`savesmap_vars' `savesmap'`direction_num'_b`ii'_rep`rep'"
 							local ++ii
 						}
-						local all_savesmap_vars`direction_num' "`all_savesmap_vars`direction_num'' `savesmap_vars'" 
+						local all_savesmap_vars`direction_num' "`all_savesmap_vars`direction_num'' `savesmap_vars'"
 					}
 
-					// PJL: currently `savemanifold' does nothing in the plugin. 
 					if `mata_mode' & "`savemanifold'" !="" {
 						local counter = 1
 						foreach v of varlist ``manifold'' {
@@ -1947,21 +1741,30 @@ program define edmXmap, eclass
 						mat r`direction_num'[`task_num',1] = `direction_num'
 						mat r`direction_num'[`task_num',2] = `lib_size'
 
-						local save_prediction = (`task_num' == `num_tasks' & "`predict'" != "")
-
 						if `mata_mode' {
-							break mata: smap_block("``manifold''","", "`x_f'", "`x_p'","`train_set'","`predict_set'",`j',`k_size', "`algorithm'","`savesmap_vars'","`force'",`missingdistance`direction_num'')
+							break mata: smap_block("``manifold''", "", "`x_f'", "`x_p'", "`train_set'", "`predict_set'", ///
+								`j', `k_size', "`algorithm'", "`savesmap_vars'", "`force'", `missingdistance`direction_num'', ///
+								`idw', "`panel_id'", `max_e', ///
+								`total_num_extras', `z_e_varying_count', "`z_factor_var'")
 
-							qui corr `x_f' `x_p' if `predict_set'
+							// Ignore super tiny S-map coefficients (the plugin seems to do this)
+							foreach smapvar of local savesmap_vars {
+								qui replace `smapvar' = . if abs(`smapvar') < 1e-8
+							}
+
+							cap corr `x_f' `x_p' if `predict_set'
 							mat r`direction_num'[`task_num',3] = r(rho)
 
 							tempvar mae
 							qui gen double `mae' = abs(`x_p' - `x_f') if `predict_set'
 							qui sum `mae'
 							drop `mae'
-							mat r`direction_num'[`task_num',4] = r(mean)
+							mat r`direction_num'[`task_num', 4] = r(mean)
+							if r(mean) < 1e-8 {
+								mat r`direction_num'[`task_num', 4] = 0
+							}
 
-							if `save_prediction' {
+							if (`task_num' == `num_tasks' & "`predict'" != "") {
 								cap replace `predict' = `x_p' if `x_p' != .
 							}
 						}
@@ -1970,7 +1773,6 @@ program define edmXmap, eclass
 						}
 
 						local ++task_num
-						local newTrainPredictSplit = 0
 					}
 				}
 			}
@@ -1992,19 +1794,10 @@ program define edmXmap, eclass
 			local result_matrix = "r1"
 			local save_predict_mode = "`predict'" != ""
 			local save_copredict_mode = 0 // Only possible for the final direction
-			plugin call edm_plugin `predict' `all_savesmap_vars`direction_num'', "collect_results" "`result_matrix'" "`save_predict_mode'" "`save_copredict_mode'"
+			plugin call edm_plugin `predict' `all_savesmap_vars`direction_num'' if `touse', "collect_results" "`result_matrix'" "`save_predict_mode'" "`save_copredict_mode'"
 		}
 
-		* reset the panel structure
 		if ("`dt'" == "dt") | ("`olddt'" == "olddt") {
-			sort `original_id' `original_t'
-			qui xtset `original_id' `original_t'
-			if "`original_id'" != ""{
-				qui xtset `original_id' `original_t'
-			}
-			else {
-				qui tsset `original_t'
-			}
 			if `parsed_dt' == 0 {
 				if "`direction'" == "oneway" {
 					local cmdfootnote "`cmdfootnote'Note: dt option is ignored due to lack of variations in time delta"
@@ -2027,12 +1820,11 @@ program define edmXmap, eclass
 		tempvar co_x_p
 		qui gen double `co_x_p' = .
 
-		//check whether dt transformation is required for copredict?
-		// extract t for copredict variables -> add to copredict extras
-		// set to new id t for mainfold construction
 		if `mata_mode' {
 			qui replace `co_train_set' = 0 if `usable' == 0
-			break mata: smap_block("``manifold''","`co_mapping'", "`x_f'", "`co_x_p'","`co_train_set'","`co_predict_set'",`last_theta',`k_size',"`algorithm'","","`force'",`missingdistance')
+			break mata: smap_block("``manifold''", "`co_mapping'", "`x_f'", "`co_x_p'", "`co_train_set'", "`co_predict_set'", ///
+				`last_theta', `k_size', "`algorithm'", "", "`force'", `missingdistance', `idw', "`panel_id'", `max_e', ///
+				`total_num_extras', `z_e_varying_count', "`z_factor_var'")
 		}
 	}
 
@@ -2042,7 +1834,7 @@ program define edmXmap, eclass
 		local result_matrix = "r`num_directions'"
 		local save_predict_mode = ("`predict'" != "")
 		local save_copredict_mode = ("`copredictvar'" != "")
-		plugin call edm_plugin `predict' `co_x_p' `all_savesmap_vars`num_directions'', "collect_results" "`result_matrix'" "`save_predict_mode'" "`save_copredict_mode'"
+		plugin call edm_plugin `predict' `co_x_p' `all_savesmap_vars`num_directions'' if `touse', "collect_results" "`result_matrix'" "`save_predict_mode'" "`save_copredict_mode'"
 	}
 
 	if ("`copredictvar'" != "") {
@@ -2050,18 +1842,12 @@ program define edmXmap, eclass
 		qui label variable `copredict' "edm copredicted `copredictvar' using manifold `ori_x' `ori_y'"
 	}
 
-	if !`parsed_dt' {
-		qui keep if `before_tsfill' != .
-		drop `before_tsfill'
-	}
-
 	mat cfull = (r1[1,3],r2[1,3])
 
-	/* local cfullname = subinstr("`ori_y'|M(`ori_x') `ori_x'|M(`ori_y')",".","/",.) */
 	local name1 = subinstr("`ori_y'|M(`ori_x')",".","/",.)
 	local name2 = subinstr("`ori_x'|M(`ori_y')",".","/",.)
 	local shortened = 1
-	forvalues n =1/2 {
+	forvalues n = 1/2 {
 		if strlen("`name`n''") > 32 {
 			local name`n' = substr("`name`n''",1,29) + "~`shortened'"
 			local ++shortened
@@ -2069,13 +1855,14 @@ program define edmXmap, eclass
 	}
 	matrix colnames cfull = `name1' `name2'
 	matrix rownames cfull = rho
-	/* mat list cfull */
+
 	if "`direction'" == "oneway" {
 		mat cfull = cfull[1...,1]
 	}
-	/* mat list cfull */
-	ereturn post cfull, esample(`usable')
-	ereturn scalar N = `num_usable'
+
+	ereturn post cfull, esample(`touse')
+	ereturn scalar N = `num_touse'
+
 	ereturn local subcommand = "xmap"
 	ereturn matrix xmap_1  = r1
 	if "`direction'" == "both" {
@@ -2211,8 +1998,7 @@ Univariate simplex projection with manifold construct x and its lag values
 			local kr = colsof(`r')
 			mat `reported_r' = J(`nr',1,0)
 			mat `summary_r' = J(1,6,.)
-			/* mat list `r'
-			mat list `reported_r' */
+
 			forvalues i = 1/ `nr' {
 				mat `buffer' = J(1,2,.)
 				if `reported_r'[`i',1] == 1 {
@@ -2225,14 +2011,14 @@ Univariate simplex projection with manifold construct x and its lag values
 						if `r'[`j',1] == `base_E' & `r'[`j',2] == `base_theta' {
 							mat `buffer' = (`buffer'\ `=`r'[`j',3]',`=`r'[`j',4]')
 							mat `reported_r'[`j',1] =1
-							/* mat list `buffer' */
 						}
 					}
 				}
-				/* noi mat list `buffer' */
+
 				// now get the mean and st
 				tempname mat_mean mat_sd
 				mata: st_matrix("`mat_sd'", diagonal(sqrt(variance(st_matrix("`buffer'"))))')
+
 				/* if changes to standard error */
 				/* mata: st_matrix("`mat_sd'", diagonal(sqrt(variance(st_matrix("`buffer'"))))/sqrt(`nr')') */
 				mata: st_matrix("`mat_mean'", mean(st_matrix("`buffer'")))
@@ -2269,7 +2055,6 @@ Univariate simplex projection with manifold construct x and its lag values
 			di as text "Note: Actual E is higher than the specified E due to extras"
 		}
 		di as text ustrtrim(e(cmdfootnote))
-		/* di as txt "Note: E is the embedding dimension" */
 	}
 	else if e(subcommand) == "xmap" {
 		di as txt "Convergent Cross-mapping result for variables {bf:`=e(x)'} and {bf:`=e(y)'}"
@@ -2280,7 +2065,6 @@ Univariate simplex projection with manifold construct x and its lag values
 		}
 		if e(missingdistance)>0 & e(missingdistance)!= . {
 			di as text "Missing values are assumed to have a distance of " _c
-			/* di `:di %8.2g `=e(missingdistance)'' _c */
 
 			if `=e(missingdistance1)' != `=e(missingdistance2)' & `=e(missingdistance1)' !=. & e(direction) != "oneway" {
 				di `:di %8.2g `=e(missingdistance1)'' _c
@@ -2366,8 +2150,7 @@ Univariate simplex projection with manifold construct x and its lag values
 				mat `reported_r' = J(`nr',1,0)
 
 				mat `summary_r' = J(1,6,.)
-				/* mat list `r'
-				mat list `reported_r' */
+
 				forvalues i = 1/ `nr' {
 					mat `buffer' = J(1,2,.)
 					if `reported_r'[`i',1] == 1 {
@@ -2380,13 +2163,12 @@ Univariate simplex projection with manifold construct x and its lag values
 							if `r'[`j',1] == `base_direction' & `r'[`j',2] == `base_L' {
 								mat `buffer' = (`buffer'\ `=`r'[`j',3]',`=`r'[`j',4]')
 								mat `reported_r'[`j',1] =1
-								/* mat list `buffer' */
 							}
 						}
 					}
 					// now get the mean and st
 					tempname mat_mean mat_sd
-					/* mat list `buffer' */
+
 					mata: st_matrix("`mat_sd'", diagonal(sqrt(variance(st_matrix("`buffer'"))))')
 					mata: st_matrix("`mat_mean'", mean(st_matrix("`buffer'")))
 
@@ -2418,8 +2200,6 @@ Univariate simplex projection with manifold construct x and its lag values
 			di as text "Note: Results from `=e(replicate)' replications"
 		}
 
-
-
 		if "`=e(cmdfootnote)'" != "." {
 			di as text ustrtrim(e(cmdfootnote))
 		}
@@ -2431,14 +2211,8 @@ Univariate simplex projection with manifold construct x and its lag values
 		else {
 			di ""
 		}
-		/* di as txt "Note: The embedding dimension E is `=e(e)', theta (distance weight) is `=e(theta)'" */
 	}
-	/* if `=e(ci)'>0 & `=e(ci)'<100 {
-		di as text "Note: CI is estimated based on mean +/- " _c
-		local sdm:display %10.2f `=invnormal(1-(100-`=e(ci)')/200)'
-		di trim("`sdm'") _c
-		di "*std / sqrt(`=e(replicate)')"
-	} */
+
 	if `=e(force_compute)' == 1 {
 		//di as txt "Note: -force- option is specified. The estimate may not be derived from the specified k."
 	}
@@ -2453,33 +2227,404 @@ Univariate simplex projection with manifold construct x and its lag values
 			di `:di %8.2g `=e(dtw)''
 		}
 	}
-
-	/* di as txt "For more information, please refer to {help edm:help file} and the article." */
 end
 
+capture mata mata drop burn_rvs()
+mata:
+mata set matastrict on
+void burn_rvs(real scalar num)
+{
+	real scalar i
+	for(i = 1; i <= num; i++) {
+		(void) runiform(1, 1)
+	}
+}
+end
+
+capture mata mata drop observation_numbers()
+mata:
+mata set matastrict on
+real matrix observation_numbers(real matrix t, real matrix x,
+		real scalar allow_missing_mode, real scalar dtMode)
+{
+	real matrix obsNum, tScaled
+
+	real scalar obs, n, i
+	obs = 0
+	n = rows(t)
+
+	obsNum = J(n, 1, .)
+
+	if (dtMode) {
+		for(i=1; i<=n; i++) {
+			if (t[i] != . && (allow_missing_mode || x[i] != .)) {
+				obsNum[i] = obs
+				obs = obs + 1
+			}
+			else {
+				obsNum[i] = .
+			}
+		}
+	}
+	else {
+		real matrix dt
+		real scalar minDT
+
+		dt = t[2..rows(t)] :- t[1..rows(t)-1]
+		minDT = min(dt)
+
+		tScaled = (t :- min(t)) :/ minDT
+
+		for(i = 1; i <= n; i++) {
+			if (t[i] != .) {
+				obsNum[i] = round(tScaled[i])
+			}
+			else {
+				obsNum[i] = .
+			}
+		}
+	}
+	return(obsNum)
+}
+end
+
+capture mata mata drop find_obs_num()
+mata:
+mata set matastrict on
+real scalar find_obs_num(real matrix obsNum, real scalar target, real scalar start,
+		real scalar direction, real scalar panelMode, real matrix panel)
+{
+	real scalar i, nobs
+
+	i = start
+	nobs = rows(obsNum)
+
+	while (i >= 1 && i <= nobs) {
+		if (panelMode) {
+			if (panel[i] != panel[start]) {
+				return(.)
+			}
+		}
+
+		if (obsNum[i] == target) {
+			return(i)
+		}
+
+		i = i + direction;
+	}
+
+	return(.)
+}
+end
+
+capture mata mata drop calculate_dt()
+mata:
+mata set matastrict on
+void calculate_dt(
+		string scalar timeVar, string scalar xVar, string scalar panelVar,
+		real scalar allow_missing_mode, real scalar tau, real scalar p,
+		string scalar dt0Var, string scalar dtValueVar)
+{
+	real matrix t, x, obsNum, panel, dt, dt0
+	real scalar panelMode
+
+	st_view(t, ., timeVar, .)
+	st_view(x, ., xVar, .)
+
+	obsNum = observation_numbers(t, x, allow_missing_mode, 1)
+
+	if (panelVar != "") {
+		panelMode = 1
+		st_view(panel, ., panelVar, .)
+	}
+	else {
+		panelMode = 0
+		panel = .
+	}
+
+	st_view(dt0, ., dt0Var, .)
+	st_view(dt, ., dtValueVar, .)
+
+	real scalar n, i, ii
+	n = rows(t)
+
+	for(i=1;i<=n;i++) {
+		if (obsNum[i] == .) {
+			dt0[i] = .
+			dt[i] = .
+			continue
+		}
+
+		/* Go forward by 'p' to find the time of the corresponding target. */
+		ii = find_obs_num(obsNum, obsNum[i] + p, i, p / abs(p), panelMode, panel)
+
+		if (ii != .) {
+			dt0[i] = t[ii] - t[i]
+		}
+		else {
+			dt0[i] = .
+		}
+
+		/* For all other 'dt', we go backward to find the distance between
+		 * this observation and the tau-previous one. */
+		ii = find_obs_num(obsNum, obsNum[i] - tau, i, -tau / abs(tau), panelMode, panel)
+
+		if (ii != .) {
+			dt[i] = t[i] - t[ii]
+		}
+		else {
+			dt[i] = .
+		}
+	}
+}
+end
+
+
+capture mata mata drop construct_manifold()
+mata:
+mata set matastrict on
+void construct_manifold(
+		string scalar touse, string scalar panelVar,
+		string scalar xVar, string scalar timeVar, string scalar zStr, string scalar target,
+		real scalar numExtras, numEExtras, real scalar dtMode, real scalar reldt, real scalar dtw,
+		real scalar E, real scalar tau, real scalar p,
+		real scalar allow_missing_mode, real scalar copredict_mode)
+{
+
+	string rowvector zVarsSplit
+	real scalar numUnlaggedExtras
+
+	zStr = strtrim(zStr)
+	zVarsSplit = tokens(zStr)
+
+	numUnlaggedExtras = numExtras - numEExtras
+
+	real scalar k
+	real matrix t, x, obsNum, panel, zVars, yTS
+	real scalar panelMode
+
+	st_view(t, ., timeVar, touse)
+	st_view(x, ., xVar, touse)
+	st_view(zVars, ., zVarsSplit, touse)
+	st_view(yTS, ., target, touse)
+
+	obsNum = observation_numbers(t, x, allow_missing_mode, dtMode)
+
+	if (panelVar != "") {
+		panelMode = 1
+		st_view(panel, ., panelVar, touse)
+	}
+	else {
+		panelMode = 0
+		panel = .
+	}
+
+	/* Create temporary variables to hold the manifold, and
+	 * create matrix views to be able to populate the variables. */
+	string rowvector xLagNames, dtLagNames, eextraLagNames, extraNames
+	real matrix xLags, dtLags, eextraLags, extras
+
+	xLagNames = st_tempname(E)
+	st_view(xLags, ., st_addvar("double", xLagNames), touse)
+
+	dtLagNames = st_tempname(dtMode * E)
+	st_view(dtLags, ., st_addvar("double", dtLagNames), touse)
+
+	eextraLagNames = st_tempname(numEExtras * E)
+	st_view(eextraLags, ., st_addvar("double", eextraLagNames), touse)
+
+	extraNames = st_tempname(numUnlaggedExtras)
+	st_view(extras, ., st_addvar("double", extraNames), touse)
+
+	/* Start generating the manifold point-by-point. */
+	real scalar n, i, targetInd, j, col
+	n = rows(t)
+
+	string scalar yName
+	real matrix y
+
+	yName = st_tempname()
+	st_view(y, ., st_addvar("double", yName), touse)
+	y[.] = J(n, 1, .)
+
+	real rowvector laggedIndices
+	real scalar tNowInd, tNextInd
+
+	for(i = 1; i <= n; i++) {
+		if (obsNum[i] == .) {
+			continue
+		}
+
+		/* Go forward by 'p' to find the time of the corresponding target. */
+		targetInd = find_obs_num(obsNum, obsNum[i] + p, i, p / abs(p), panelMode, panel)
+		if (targetInd != .) {
+			y[i] = yTS[targetInd]
+		}
+
+		laggedIndices = J(1, E, .)
+
+		for(j = 1; j <= E; j++) {
+			laggedIndices[j] = find_obs_num(obsNum, obsNum[i] - (j-1)*tau, i, -1, panelMode, panel)
+		}
+
+		for(j = 1; j <= E; j++) {
+			if (laggedIndices[j] != .) {
+				xLags[i, j] = x[laggedIndices[j]]
+			}
+		}
+
+		for(j = 1; j <= dtMode * E; j++) {
+			if (j == 1 || reldt) {
+				tNowInd = laggedIndices[j];
+
+				if (targetInd != . && tNowInd != .) {
+					dtLags[i, j] = dtw * (t[targetInd] - t[tNowInd])
+				}
+				else {
+					dtLags[i, j] = .
+				}
+			}
+			else {
+				/* For all other 'dt', we go backward to find the distance between
+				 * this observation and the tau-previous one. */
+				tNextInd = laggedIndices[j - 1];
+			    tNowInd = laggedIndices[j];
+
+				if (tNextInd != . && tNowInd != .) {
+					dtLags[i, j] = dtw * (t[tNextInd] - t[tNowInd])
+				}
+				else {
+					dtLags[i, j] = .
+				}
+			}
+		}
+
+		col = 0
+		for (k = 1; k <= numEExtras; k++) {
+			for(j = 1; j <= E; j++) {
+				if (laggedIndices[j] != .) {
+					eextraLags[i, col + j] = zVars[laggedIndices[j], k]
+				}
+			}
+			col = col + E
+		}
+
+		for (k = 1; k <= numUnlaggedExtras; k++) {
+			extras[i, k] = zVars[i, numEExtras + k]
+		}
+	}
+
+	/* Put the manifolds together */
+	string scalar mani, maniName
+	real scalar sE
+
+	for(i = 1; i <= E-1; i++) {
+		if (i < E-1 && copredict_mode) {
+			continue;
+		}
+
+		sE = i + 1
+
+		mani = invtokens(xLagNames[1..sE])
+
+		if (dtMode) {
+			mani = mani + " " + invtokens(dtLagNames[1..sE])
+		}
+
+		col = 0
+		for (k = 0; k < numEExtras; k++) {
+			mani = mani + " " + invtokens(eextraLagNames[col+1..col+sE])
+			col = col + E
+		}
+
+		if (numUnlaggedExtras > 0) {
+			mani = mani + " " + invtokens(extraNames)
+		}
+
+		if (!copredict_mode) {
+			maniName = sprintf("mapping_%f", i)
+			st_local(maniName, mani)
+		}
+	}
+
+
+	if (!copredict_mode) {
+		st_local("max_e_manifold", mani)
+		st_local("x_f", yName)
+	}
+	else {
+		st_local("co_mapping", mani)
+		st_local("co_x_f", yName)
+	}
+}
+end
 
 capture mata mata drop smap_block()
 mata:
 mata set matastrict on
-void smap_block(string scalar manifold, string scalar p_manifold, string scalar prediction, string scalar result, string scalar train_use, string scalar predict_use, real scalar theta, real scalar l, string scalar algorithm, string scalar savesmap_vars, string scalar force, real scalar missingdistance)
+void smap_block(
+		string scalar manifold, string scalar p_manifold, string scalar prediction, string scalar result,
+		string scalar train_use, string scalar predict_use, real scalar theta, real scalar l, string scalar algorithm,
+		string scalar savesmap_vars, string scalar force, real scalar missingdistance,
+		real scalar idw, string scalar panel_id,
+		real scalar E, real scalar total_num_extras, real scalar z_e_varying_count, string scalar z_factor_var)
 {
 	real scalar force_compute, k, i
-	force_compute = force == "force" // check whether we need to force the computation if k is too high
-	real matrix M, Mp, y, ystar,S
-	st_view(M, ., tokens(manifold), train_use) //base manifold
-	st_view(y, ., prediction, train_use) // known prediction of the base manifold
+	force_compute = force == "force" /* check whether we need to force the computation if k is too high */
+	real matrix M, Mp, y, ystar, train_panel_ids, predict_panel_ids
+	st_view(M, ., tokens(manifold), train_use) /* base manifold */
+	st_view(y, ., prediction, train_use) /* known prediction of the base manifold */
 	st_view(ystar, ., result, predict_use)
+
+	if (idw != 0) {
+		st_view(train_panel_ids, ., panel_id, train_use)
+		st_view(predict_panel_ids, ., panel_id, predict_use)
+	}
+
 	if (p_manifold != "") {
-		//data used for prediction is different than the source manifold
+		/* data used for prediction is different than the source manifold */
 		st_view(Mp, ., tokens(p_manifold), predict_use)
 	}
 	else {
 		st_view(Mp, ., tokens(manifold), predict_use)
 	}
 
-	if (l <= 0) { //default value of local library size
+	if (l <= 0) { /* default value of local library size */
 		k = cols(M)
-		l = k + 1 // local library size (E+1) + itself
+		l = k + 1 /* local library size (E+1) + itself */
+	}
+
+	string matrix zFactors
+	real scalar zFactorsSize
+	if (z_factor_var != "") {
+		zFactors = tokens(z_factor_var)
+		zFactorsSize = cols(zFactors)
+	}
+	else {
+		zFactorsSize = 0
+	}
+
+	real scalar num_x_and_dt
+	num_x_and_dt = cols(M) - total_num_extras
+
+	real matrix factorVars
+	factorVars = J(1, cols(M), 0)
+
+	real scalar ind, numLags
+	ind = num_x_and_dt + 1
+
+	for (i = 1; i <= zFactorsSize; i++) {
+		if (i <= z_e_varying_count) {
+			numLags = E
+		}
+		else {
+			numLags = 1
+		}
+		
+		for (j = 1; j <= numLags; j++) {
+			factorVars[ind] = (zFactors[i] == "1")
+			ind = ind + 1
+		}
 	}
 
 	real matrix B
@@ -2491,14 +2636,24 @@ void smap_block(string scalar manifold, string scalar p_manifold, string scalar 
 	else {
 		save_mode = 0
 	}
+
 	real scalar n
 	n = rows(Mp)
 
 	real rowvector b
+	real scalar targetPanel
 
-	for(i=1;i<=n;i++) {
-		b= Mp[i,.]
-		ystar[i] = mf_smap_single(M,b,y,l,theta,algorithm, save_mode*i, B, force_compute,missingdistance)
+	for(i = 1; i <= n; i++) {
+		b = Mp[i,.]
+		if (idw != 0) {
+			targetPanel = predict_panel_ids[i]
+		}
+		else {
+			targetPanel = .
+		}
+		ystar[i] = mf_smap_single(M,b,y,l,theta,algorithm, save_mode*i, B,
+				force_compute, missingdistance, idw, train_panel_ids,
+				targetPanel, factorVars)
 	}
 }
 end
@@ -2507,36 +2662,61 @@ end
 capture mata mata drop mf_smap_single()
 mata:
 mata set matastrict on
-real scalar mf_smap_single(real matrix M, real rowvector b, real colvector y, real scalar l, real scalar theta, string scalar algorithm, real scalar save_index, real matrix Beta_smap, real scalar force_compute, real scalar missingdistance)
+real scalar mf_smap_single(
+		real matrix M, real rowvector b, real colvector y, real scalar l,
+		real scalar theta, string scalar algorithm, real scalar save_index,
+		real matrix Beta_smap, real scalar force_compute, real scalar missingdistance,
+		real scalar idw, real matrix panel_ids, real scalar targetPanel,
+		real matrix factorVars)
 {
-	/* real scalar mf_smap_single(real matrix M, real rowvector b, real colvector y, real scalar l, real scalar theta, string scalar algorithm, real scalar save_index, real matrix Beta_smap, transmorphic scalar Acache) */
-
 	/* M : manifold matrix
-	b : the vector used for prediction
-	y: existing predicted value for M (same number of rows with M)
-	l : library size
-	theta: exponential weighting parameter
+	 * b : the vector used for prediction
+	 * y: existing predicted value for M (same number of rows with M)
+	 * l : library size
+	 * theta: exponential weighting parameter
 	*/
 
-	/* sprintf("begin") */
 	real colvector d, w, a
 	real colvector ind, v
-	real scalar i,j,n,r,n_ls
+	real scalar i, j, k, n, r
 	n = rows(M)
-	d = J(n, 1, .)
+	d = J(1, n, .)
 
-	for(i=1;i<=n;i++) {
+	for(i = 1; i <= n; i++) {
 		if (algorithm =="smap" && (hasmissing(y[i]) | hasmissing(M[i,.]))) {
 			d[i] = .
 		} else {
-			a= M[i,.] - b
 
-			if (missingdistance !=0) {
-				a=editvalue(a,., missingdistance)
+			a = M[i,.] - b
+
+			for (j = 1; j <= cols(a); j++) {
+				if (factorVars[j]) {
+					a[j] = M[i,j] != b[j]
+				}
+			}
+			
+			if (missingdistance != 0) {
+				a = editvalue(a,. , missingdistance)
 			}
 
-			// d is Euclidean distance
-			d[i] = (a*a')^(1/2)
+			/* d is (temporarily) the squared Euclidean distance */
+			d[i] = (a*a')
+
+			/* If we have panel data, penalise the points if they
+			 * come from different panels */
+			if (idw != 0) {
+				if (panel_ids[i] != targetPanel) {
+					if (idw < 0) {
+						d[i] = .
+					}
+					else {
+						d[i] = d[i] + idw
+					}
+				}
+			}
+
+			/* Now d is the Euclidean distance */
+			d[i] = d[i]^(1/2)
 
 			if (d[i] == 0) {
 				d[i] = .
@@ -2544,22 +2724,15 @@ real scalar mf_smap_single(real matrix M, real rowvector b, real colvector y, re
 		}
 	}
 
-	minindex(d, l, ind, v)
-	// create weights for each point in the library
+	/* This is important to copy 'l' into 'k', otherwise we may
+	 * accidently 'force' l to be too small for future predictions. */
+	k = l
 
-	// find the smallest non-zero distance
-	real scalar d_base
-	d_base = d[ind[1]]
+	minindex(d, k, ind, v)
 
-	w = J(l, 1, .)
-	if (rows(ind)<l) {
-		if (force_compute==1) {
-			l=rows(ind) // change l to match neighbor size
-			/* sprintf("library size has been reduced for some observations")	 */
-			if (l<=0) {
-				sprintf("Insufficient number of unique observations in the dataset even with -force- option.")
-				exit(error(503))
-			}
+	if (rows(ind) < k) {
+		if (force_compute) {
+			k = rows(ind) /* Force k to use fewer neighbours */
 		}
 		else {
 			sprintf("Insufficient number of unique observations, consider tweaking the values of E, k or use -force- option")
@@ -2567,15 +2740,35 @@ real scalar mf_smap_single(real matrix M, real rowvector b, real colvector y, re
 		}
 	}
 
+	/* We need at least k=1 to continue. 
+	 * For example, 'force' may reduce k to 0. */
+	if (k < 1) {
+		/* Normally we just let the prediction be '.' and silently keep going. */
+		if (force_compute) {
+			return(.)
+		}
+		else {
+			/* We should never be able to end up here, but just in case.. */
+			sprintf("Cannot make predictions using k=0 neighbours.")
+			exit(error(503))
+		}
+	}
+
+	/* Find the smallest non-zero distance */
+	real scalar d_base
+	d_base = d[ind[1]]
+
+	w = J(k, 1, .)
+
 	r = 0
 
 	if (algorithm == "" | algorithm == "simplex") {
-		for(j=1;j<=l;j++) {
+		for(j=1;j<=k;j++) {
 			w[j] = exp(-theta*(d[ind[j]] / d_base))
 		}
 		w = w/sum(w)
 
-		for(j=1;j<=l;j++) {
+		for(j=1;j<=k;j++) {
 			r = r +  y[ind[j]] * w[j]
 		}
 
@@ -2588,24 +2781,24 @@ real scalar mf_smap_single(real matrix M, real rowvector b, real colvector y, re
 		real rowvector x_pred
 		real scalar mean_d
 
-		for(j=1;j<=l;j++) {
+		for(j=1;j<=k;j++) {
 			w[j] = d[ind[j]]
 		}
 
 		mean_d = mean(w)
 
-		for(j=1;j<=l;j++) {
+		for(j=1;j<=k;j++) {
 			w[j] = exp(-theta*(w[j] / mean_d))
 		}
 
-		y_ls = J(l, 1, .)
-		X_ls = J(l, cols(M), .)
-		w_ls = J(l, 1, .)
+		y_ls = J(k, 1, .)
+		X_ls = J(k, cols(M), .)
+		w_ls = J(k, 1, .)
 
 		real scalar rowc
 		rowc = 0
 
-		for(j=1;j<=l;j++) {
+		for(j=1;j<=k;j++) {
 			rowc++
 			if (algorithm == "llr") {
 				y_ls[rowc]    = y[ind[j]]
@@ -2618,7 +2811,7 @@ real scalar mf_smap_single(real matrix M, real rowvector b, real colvector y, re
 				w_ls[rowc] = w[j]
 			}
 		}
-		if (rowc ==0) {
+		if (rowc == 0) {
 			return(.)
 		}
 
@@ -2626,14 +2819,15 @@ real scalar mf_smap_single(real matrix M, real rowvector b, real colvector y, re
 		X_ls = X_ls[1..rowc,.]
 		w_ls = w_ls[1..rowc]
 
-		n_ls   = rows(X_ls)
-		// add constant
-		X_ls    = w_ls,X_ls
+		n_ls = rows(X_ls)
+
+		/* Add a (weighted) column of ones to represent the constant */
+		X_ls = w_ls,X_ls
 
 		if (algorithm == "llr") {
 			XpXi = quadcross(X_ls, w_ls, X_ls)
 			XpXi = invsym(XpXi)
-			b_ls    = XpXi*quadcross(X_ls, w_ls, y_ls)
+			b_ls = XpXi*quadcross(X_ls, w_ls, y_ls)
 		}
 		else {
 			b_ls = svsolve(X_ls' * X_ls, X_ls' * y_ls)
@@ -2641,10 +2835,9 @@ real scalar mf_smap_single(real matrix M, real rowvector b, real colvector y, re
 
 		if (save_index>0) {
 			Beta_smap[save_index,.] = editvalue(b_ls',0,.)
-			/* Beta_smap[save_index,.] = b_ls' */
 		}
 
-		x_pred = 1,editvalue(b,.,0)
+		x_pred = 1, editvalue(b,.,0)
 
 		r = x_pred * b_ls
 
@@ -2657,7 +2850,7 @@ end
 // Load the C++ implementation
 cap program edm_plugin, plugin using(edm.plugin)
 
-// The developers of this plugin often have the file by a different
+// The developers of this plugin may have the file by a different
 // name locally, so this will load the plugin based on the OS-specific
 // filenames.
 cap program edm_plugin, plugin using(edm_`=c(os)'_x64.plugin)
