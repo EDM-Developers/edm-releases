@@ -20,7 +20,8 @@ variable for exploration using simplex projection or S-mapping.
 [tau(integer)] [theta(numlist ascending)] [k(integer)] [algorithm(string)] [replicate(integer)]
 [seed(integer)] [full] [predict(variable)] [copredict(variable)] [copredictvar(variables)]
 [crossfold(integer)] [ci(integer)] [extraembed(variables)] [allowmissing] [missingdistance(real)]
-[dt] [dtweight(real)] [dtsave(name)] [details] [reportrawe] [force] 
+[dt] [reldt] [dtweight(real)] [dtsave(name)] [details] [reportrawe] [strict] [predictionhorizon(integer)]
+[nthreads(integer)] [idw(real)]
 
 {p 4 4 2}  The second subcommand {bf:xmap} performs convergent cross-mapping (CCM). The subcommand
 follows the syntax below and requires two variables to follow immediately after xmap. It shares many
@@ -31,8 +32,8 @@ different purpose of the analysis.
 [library(numlist ascending)] [k(integer)] [algorithm(string)] [replicate(integer)]
 [direction(string)] [seed(integer)] [predict(variable)] [copredict(variable)]
 [copredictvar(variables)] [ci(integer)] [extraembed(variables)] [allowmissing]
-[missingdistance(real)] [dt] [dtweight(real)] [dtsave(name)] [oneway] [details] [savesmap(string)]
-[force]
+[missingdistance(real)] [dt] [reldt] [dtweight(real)] [dtsave(name)] [oneway] [details] [savesmap(string)]
+[strict] [predictionhorizon(integer)] [nthreads(integer)] [idw(real)]
 
 {p 4 4 2} The third subcommand {bf:update} updates the plugin to its latest version
 
@@ -119,12 +120,13 @@ the edm as a variable, which could be useful for plotting and diagnosis.
 {phang}  {bf:copredict(variable)}: This option allows you to save the coprediction result as a
 variable. You must specify the copredictvar(variables) options for this to work.
 
-{phang}  {bf:copredictvar(variables)}: This option is used together with copredict option and
-specify the variables used for coprediction. The number of variables must match the main variables
-specified.
+{phang}  {bf:copredictvar(variable)}: This option specifies the variable used for coprediction.
+A second prediction is run for each configuration of E, library, etc., using the same library set
+but with a prediction set built from the lagged embedding of this variable.
 
-{phang}  {bf:tp(integer)}: This option adjusts the default forward prediction period. By default,
-the explore mode uses tp(1) and the xmap mode uses tp(0).
+{phang}  {bf:Predictionhorizon(integer)}: This option adjusts the default number of observations ahead
+which we predict. By default, the explore mode predict τ observations ahead and the xmap mode uses p(0).
+This parameter can be negative.
 
 {phang}  {bf:details}: By default, only mean values and standard deviations are reported when the
 replicate option is specified. The details option overrides this behaviour by providing results for
@@ -159,10 +161,12 @@ values of the CIs. These return values can be used for further post-processing.
 {phang}  {bf:seed(integer)}: This option specifies the seed used for the random number. In some
 special cases users may wish to use this in order to keep library and prediction sets the same
 across simplex projection and S-mapping with a single variable, or across multiple CCM runs with
-different variables.
+different variables. Note: if "set rng" has been used to change Stata's random number generation
+algorithm, then edm will temporarily change it the default 64 bit Mersenne twister internally.
 
-{phang}  {bf:force}: When this option is specified, the computation will try to continue even the
-required number of neighboring observations is not present. 
+{phang}  {bf:strict}: When this option is specified, the computation will fail if the requested
+number of neighboring observations is not present. By default, if not all of the request neighbors
+are available, the computation will just continue using as many as possible.
 
 {phang}  {bf:ALLOWMISSing} This option allows observations with missing values to be used in the
 manifold. Vectors with at least one non-missing values will be used in the mainfold construction.
@@ -181,17 +185,34 @@ extra variables are not included in the embedding, however the syntax extra(z(e)
 of z in the embedding.
 
 {phang}  {bf:dt}: This option allows automatic inclusion of the timestamp differencing in the
-embedding. Generally, there will be E-1 dt variables included for an embedding with E dimensions. By
-default, the weights used for these additional variables equal to the standard deviation of the main
+embedding. There will be E dt variables included for an embedding with E dimensions. By default,
+the weights used for these additional variables equal to the standard deviation of the main
 mapping variable divided by the standard deviation of the time difference. This can be overridden by
 the `dtweight()` option. `dt` option will be ignored when running with data with no sampling
-variation in the time lags. 
+variation in the time lags. The first dt variable embeds the time of the between the most recent
+observation and the time of the corresponding target/predictand.
+
+{phang}  {bf:reldt}: This option, to be read as 'relative dt', is like the 'dt' option above in
+that it includes E extra variables for an embedding with E dimensions. However the timestamp
+differences added are not the time between the corresponding observations, but the time of the
+target/predictand minus the time of the lagged observations.
 
 {phang}  {bf:dtweight(real)}: This option specifies the weight used for the timestamp differencing
 variable.
 
 {phang}  {bf:dtsave(variable)}: This option allows users to save the internally generated timestamp
 differencing variable.
+
+{phang}  {bf:nthreads(integer)}: The number of threads the C++ plugin will use for parallel
+computations. The default is the number of cores available on the host computer.
+
+{phang}  {bf:idw(real)}: This parameter is used when xtset indicates that the current dataset
+is panel data. Then, idw specifies a penalty that is added to the distances between points in the
+manifold which correspond to observations from different panels. By default idw is 0, so the data
+from all panels is mixed together and treatly equally. If idw(-1) is set (or any other negative
+value), then the weight is treated as 'infinity', so neighbours will never be selected which cross
+the boundaries between panels. Setting idw(-1) with k(-1) means we may use a different number of
+neighbors for different predictions (i.e. if the panels are unbalanced).
 
 {phang}  Besides the shared parameters, edm explore supports the following extra options:
 
