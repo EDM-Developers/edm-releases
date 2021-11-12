@@ -16,24 +16,24 @@ for seasonal differencing).
 {p 4 4 2}  The {bf:explore} subcommand follows the syntax below and supports one
 variable for exploration using simplex projection or S-mapping.
 
-{p 8 12 2}  {bf:edm} explore {bf:variable} [if {bf:exp}], [e({it:numlist} ascending)]
-[tau(integer)] [theta(numlist ascending)] [k(integer)] [algorithm(string)] [replicate(integer)]
-[seed(integer)] [full] [predict(variable)] [copredict(variable)] [copredictvar(variables)]
-[crossfold(integer)] [ci(integer)] [extraembed(variables)] [allowmissing] [missingdistance(real)]
-[dt] [reldt] [dtweight(real)] [dtsave(name)] [details] [reportrawe] [strict] [predictionhorizon(integer)]
-[nthreads(integer)] [idw(real)]
+{p 8 12 2}  {bf:edm} explore {bf:variable} [if {bf:exp}], [e(numlist ascending >=2)]
+[tau(integer 1)] [theta(numlist ascending)] [k(integer 0)] [ALGorithm(string)] [REPlicate(integer 1)]
+[seed(integer 0)] [full] [RANDomize] [PREDICTionsave(name)] [COPREDICTionsave(name)] [copredictvar(string)]
+[CROSSfold(integer 0)] [CI(integer 0)] [EXTRAembed(string)] [ALLOWMISSing] [MISSINGdistance(real 0)]
+[dt] [reldt] [DTWeight(real 0)] [DTSave(name)] [DETails] [reportrawe] [strict] [Predictionhorizon(string)]
+[CODTWeight(real 0)] [dot(integer 1)] [mata] [gpu] [nthreads(integer 0)] [savemanifold(name)] [idw(real 0)]
 
 {p 4 4 2}  The second subcommand {bf:xmap} performs convergent cross-mapping (CCM). The subcommand
 follows the syntax below and requires two variables to follow immediately after xmap. It shares many
 of the same options with the explore subcommand although there are some differences given the
 different purpose of the analysis.
 
-{p 8 12 2}  {bf:edm} xmap {bf:variables} [if {bf:exp}], [e(integer)] [tau(integer)] [theta(real)]
-[library(numlist ascending)] [k(integer)] [algorithm(string)] [replicate(integer)]
-[direction(string)] [seed(integer)] [predict(variable)] [copredict(variable)]
-[copredictvar(variables)] [ci(integer)] [extraembed(variables)] [allowmissing]
-[missingdistance(real)] [dt] [reldt] [dtweight(real)] [dtsave(name)] [oneway] [details] [savesmap(string)]
-[strict] [predictionhorizon(integer)] [nthreads(integer)] [idw(real)]
+{p 8 12 2}  {bf:edm} xmap {bf:variables} [if {bf:exp}], [e(integer 2)] [tau(integer 1)] [theta(real 1)]
+[Library(numlist)] [RANDomize] [k(integer 0)] [ALGorithm(string)] [REPlicate(integer 1)] [strict]
+[DIrection(string)] [seed(integer 0)] [PREDICTionsave(name)] [COPREDICTionsave(name)] [copredictvar(string)]
+[CI(integer 0)] [EXTRAembed(string)] [ALLOWMISSing] [MISSINGdistance(real 0)] [dt] [reldt]
+[DTWeight(real 0)] [DTSave(name)] [oneway] [DETails] [SAVEsmap(string)] [Predictionhorizon(string)]
+[CODTWeight(real 0)] [dot(integer 1)] [mata] [gpu] [nthreads(integer 0)] [savemanifold(name)] [idw(real 0)]
 
 {p 4 4 2} The third subcommand {bf:update} updates the plugin to its latest version
 
@@ -100,6 +100,11 @@ observation/target vector—because each predicted observation has its own type 
 with k neighbours as rows and E + 1 coefficients as columns. As noted below, in this case special
 options are available to save these coefficients for post-processing but, again, it is not actually
 a regression model and instead should be seen as a manifold.
+
+{phang}  {bf:RANDomize}: When splitting the observations into library and prediction sets, by default
+the oldest observations go into the library set and the newest observations to the prediction set.
+Though if the randomize option is specified, the data is allocated into the two sets in a random
+fashion. If the replicate option is specified, then this randomization is enabled automatically.
 
 {phang}  {bf:replicate(integer)}: The explore subcommand uses a random 50/50 split for simplex
 projection and S-maps, whereas the xmap subcommand selects the observations randomly for library

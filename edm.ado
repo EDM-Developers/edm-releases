@@ -1,7 +1,7 @@
-*! version 1.9.0, 11Nov2021, Jinjing Li, Michael Zyphur, Patrick J. Laub, George Sugihara, Edoardo Tescari
+*! version 1.9.1, 12Nov2021, Jinjing Li, Michael Zyphur, Patrick J. Laub, George Sugihara, Edoardo Tescari
 *! contact: <jinjing.li@canberra.edu.au> or <patrick.laub@unimelb.edu.au>
 
-global EDM_VERSION = "1.9.0"
+global EDM_VERSION = "1.9.1"
 /* Empirical dynamic modelling
 
 Version history:
@@ -126,8 +126,8 @@ program define edmUpdate
 		di "Updating edm from SSC"
 		ssc install edm, `replace'
 	}
+	prog drop _all
 	discard
-
 end
 
 program define edmVersion
@@ -167,11 +167,6 @@ program define edmPluginCheck, rclass
 	}
 end
 
-/*
-program define edmCoremap, eclass
-	syntax anything  [if], [e(integer 2)] [theta(real 1)] [k(integer 0)] [library(integer 0)] [seed(integer 0)] [ALGorithm(string)] [tau(integer 1)] [DETails] [Predict(name)] [Predictionhorizon(string)] [COPredict(name)] [copredictvar(string)] [full] [force] [EXTRAembed(string)] [ALLOWMISSing] [MISSINGdistance(real 0)] trainset(string) predictset(string)
- */
-
 program define hasMissingValues
 	syntax [anything] , out(name)
 	qui gen byte `out' = 0
@@ -207,10 +202,10 @@ end
 
 
 program define edmManifoldSize, rclass
-	syntax , e(int) dt(int) dt0(int) num_extras(int) [num_eextras(int 0)]
-	local num_xs = 1 + `e'-1
-	local num_dts = `dt' * (`dt0' + `e'-1)
-	local total_num_extras = `num_extras' + `num_eextras'*(`e'-1)
+	syntax , e(int) dt(int) num_extras(int) [num_eextras(int 0)]
+	local num_xs = `e'
+	local num_dts = `dt' * `e'
+	local total_num_extras = `num_extras' + `num_eextras' * (`e' - 1)
 	return local total_num_extras = `total_num_extras'
 	return local manifold_size = `num_xs' + `num_dts' + `total_num_extras'
 end
@@ -346,14 +341,13 @@ program define edmPrintPluginProgress
 end
 
 program define edmExplore, eclass
-	syntax anything  [if], [e(numlist ascending >=2)] [theta(numlist ascending)] [k(integer 0)] ///
-			[REPlicate(integer 1)] [seed(integer 0)] [ALGorithm(string)] [tau(integer 1)] [DETails] ///
-			[PRedict(name)] [CROSSfold(integer 0)] [CI(integer 0)] [Predictionhorizon(string)] ///
-			[COPredict(name)] [copredictvar(string)] [full] [RANDomize] [force] [strict] [EXTRAembed(string)] ///
-			[ALLOWMISSing] [MISSINGdistance(real 0)] [dt] [reldt] [DTWeight(real 0)] [DTSave(name)] ///
-			[reportrawe] [CODTWeight(real 0)] [dot(integer 1)] [mata] [gpu] [nthreads(integer 0)] ///
-			[savemanifold(name)] [saveinputs(string)] [verbosity(integer 1)] [olddt] [aspectratio(real 1)] ///
-			[distance(string)] [metrics(string)] [idw(real 0)] [wassdt(integer 1)]
+	syntax anything [if], [e(numlist ascending >=2)] ///
+		[tau(integer 1)] [theta(numlist ascending)] [k(integer 0)] [ALGorithm(string)] [REPlicate(integer 1)] ///
+		[seed(integer 0)] [full] [RANDomize] [PREDICTionsave(name)] [COPREDICTionsave(name)] [copredictvar(string)] ///
+		[CROSSfold(integer 0)] [CI(integer 0)] [EXTRAembed(string)] [ALLOWMISSing] [MISSINGdistance(real 0)] ///
+		[dt] [reldt] [DTWeight(real 0)] [DTSave(name)] [DETails] [reportrawe] [strict] [Predictionhorizon(string)] ///
+		[CODTWeight(real 0)] [dot(integer 1)] [mata] [gpu] [nthreads(integer 0)] [savemanifold(name)] [idw(real 0)] ///
+		[verbosity(integer 1)] [saveinputs(string)] [metrics(string)] [distance(string)] [aspectratio(real 1)] [wassdt(integer 1)]
 
 	if ("`strict'" != "strict") {
 		local force = "force"
@@ -368,11 +362,11 @@ program define edmExplore, eclass
 	if "`dtsave'" != "" {
 		confirm new variable `dtsave'
 	}
-	if "`predict'" != "" {
-		confirm new variable `predict'
+	if "`predictionsave'" != "" {
+		confirm new variable `predictionsave'
 	}
-	if "`copredict'" != "" {
-		confirm new variable `copredict'
+	if "`copredictionsave'" != "" {
+		confirm new variable `copredictionsave'
 
 		if "`copredictvar'" == "" {
 			di as error "The copredictvar() option is not specified"
@@ -487,18 +481,9 @@ program define edmExplore, eclass
 	}
 
 	local allow_missing_mode = `missingdistance' !=0 | "`allowmissing'"=="allowmissing"
-
 	local wasserstein_mode = ("`=strlower("`distance'")'" == "wasserstein")
-	if `wasserstein_mode' {
-		if ("`olddt'" == "olddt") {
-			di "Ignoring olddt option as it cannot be specified with the Wasserstein distance"
-			local olddt = ""
-		}
-	}
-
-	local parsed_dt = ("`dt'" == "dt") | ("`olddt'" == "olddt") | ("`reldt'" == "reldt")
+	local parsed_dt = ("`dt'" == "dt") | ("`reldt'" == "reldt")
 	local parsed_reldt = ("`reldt'" == "reldt")
-	local parsed_dt0 = ("`olddt'" != "olddt")
 	local parsed_dtw = "`dtweight'"
 	local parsed_dtsave = "`dtsave'"
 
@@ -548,7 +533,6 @@ program define edmExplore, eclass
 				// if there is no variance, no sampling required
 				local parsed_dtw = 0
 				local parsed_dt = 0
-				local parsed_dt0 = 0
 				local parsed_dtsave = ""
 			}
 		}
@@ -593,7 +577,7 @@ program define edmExplore, eclass
 		mat co_r = J(`num_tasks', 4, .)
 	}
 
-	edmManifoldSize, e(`max_e') dt(`parsed_dt') dt0(`parsed_dt0') ///
+	edmManifoldSize, e(`max_e') dt(`parsed_dt') ///
 		num_extras(`z_count') num_eextras(`z_e_varying_count')
 	local manifold_size = `r(manifold_size)'
 	local total_num_extras = `r(total_num_extras)'
@@ -706,7 +690,7 @@ program define edmExplore, eclass
 		}
 
 		plugin call `plugin_name' `timevar' `x' `x' `z_vars' `usable' `co_xvar' `panel_id' `parsed_dtsave' `manifold_vars' if `touse', "launch_edm_tasks" ///
-				"`z_count'" "`parsed_dt'" "`parsed_dt0'" "`dtweight'" "`algorithm'" "`force'" "`missingdistance'" ///
+				"`z_count'" "`parsed_dt'" "`dtweight'" "`algorithm'" "`force'" "`missingdistance'" ///
 				"`nthreads'" "`verbosity'" "`num_tasks'" "`explore_mode'" "`full_mode'" "`shuffle'" "`crossfold'" "`tau'" ///
 				"`max_e'" "`allow_missing_mode'" "`theta'" "`aspectratio'"  "`distance'" "`metrics'" ///
 				"`copredict_mode'" "`cmdline'" "`z_e_varying_count'" "`idw'" "`ispanel'" "`parsed_reldt'" "`wassdt'" "`predictionhorizon'"
@@ -798,14 +782,14 @@ program define edmExplore, eclass
 	}
 
 
-	if "`predict'" != "" {
-		cap gen double `predict' = .
-		qui label variable `predict' "edm prediction result"
+	if "`predictionsave'" != "" {
+		cap gen double `predictionsave' = .
+		qui label variable `predictionsave' "edm prediction result"
 	}
 
-	if ("`copredict'" != "") {
-		qui gen double `copredict' = .
-		qui label variable `copredict' "edm copredicted `copredictvar' using manifold `ori_x'"
+	if ("`copredictionsave'" != "") {
+		qui gen double `copredictionsave' = .
+		qui label variable `copredictionsave' "edm copredicted `copredictvar' using manifold `ori_x'"
 	}
 
 	forvalues t=1/`round' {
@@ -882,7 +866,7 @@ program define edmExplore, eclass
 				local co_manifold "co_mapping_`=`i'-1'"
 			}
 
-			edmManifoldSize, e(`i') dt(`parsed_dt') dt0(`parsed_dt0') ///
+			edmManifoldSize, e(`i') dt(`parsed_dt') ///
 				num_extras(`z_count') num_eextras(`z_e_varying_count')
 			local total_num_extras = `r(total_num_extras)'
 			local e_offset = `r(manifold_size)' - `i'
@@ -931,8 +915,8 @@ program define edmExplore, eclass
 						mat r[`task_num', 4] = 0
 					}
 
-					if ("`predict'" != "") & ((`crossfold' > 1) | (`task_num' == `num_tasks')) {
-						cap replace `predict' = `x_p' if `x_p' !=.
+					if ("`predictionsave'" != "") & ((`crossfold' > 1) | (`task_num' == `num_tasks')) {
+						cap replace `predictionsave' = `x_p' if `x_p' !=.
 					}
 
 					if "`copredictvar'" != "" {
@@ -953,8 +937,8 @@ program define edmExplore, eclass
 							mat co_r[`task_num', 4] = 0
 						}
 
-						if ("`copredict'" != "") & ((`crossfold' > 1) | (`task_num' == `num_tasks')) {
-							cap replace `copredict' = `co_x_p' if `co_x_p' !=.
+						if ("`copredictionsave'" != "") & ((`crossfold' > 1) | (`task_num' == `num_tasks')) {
+							cap replace `copredictionsave' = `co_x_p' if `co_x_p' !=.
 						}
 					}
 				}
@@ -996,9 +980,9 @@ program define edmExplore, eclass
 	if `mata_mode' == 0 {
 		edmPrintPluginProgress , plugin_name(`plugin_name')
 		local result_matrix = "r"
-		local save_predict_mode = ("`predict'" != "")
+		local save_predict_mode = ("`predictionsave'" != "")
 		local save_copredict_mode = ("`copredictvar'" != "")
-		plugin call `plugin_name' `predict' `copredict' if `touse', "collect_results" "`result_matrix'" "`save_predict_mode'" "`save_copredict_mode'"
+		plugin call `plugin_name' `predictionsave' `copredictionsave' if `touse', "collect_results" "`result_matrix'" "`save_predict_mode'" "`save_copredict_mode'"
 	}
 
 	mat cfull = r[1,3]
@@ -1043,9 +1027,9 @@ program define edmExplore, eclass
 	ereturn scalar crossfold = `crossfold'
 	ereturn scalar rep_details = "`details'" == "details"
 	ereturn scalar ci = `ci'
-	ereturn local copredict ="`copredict'"
-	ereturn local copredictvar ="`copredictvar'"
-	ereturn scalar force_compute = "`force'" =="force"
+	ereturn local copredict = "`copredictionsave'"
+	ereturn local copredictvar = "`copredictvar'"
+	ereturn scalar force_compute = "`force'" == "force"
 	ereturn scalar panel =`ispanel'
 	ereturn scalar dt =`parsed_dt'
 	if `allow_missing_mode' {
@@ -1065,8 +1049,8 @@ program define edmExplore, eclass
 	else {
 		ereturn local extraembed = "`z_names'"
 	}
-	if ("`dt'" == "dt") | ("`olddt'" == "olddt") {
-		if `parsed_dt' ==0 {
+	if ("`dt'" == "dt") {
+		if `parsed_dt' == 0 {
 			ereturn local cmdfootnote "`cmdfootnote'Note: dt option is ignored due to lack of variations in time delta"
 		}
 	}
@@ -1076,14 +1060,13 @@ end
 
 
 program define edmXmap, eclass
-	syntax anything  [if], [e(integer 2)] [theta(real 1)] [Library(numlist)] [seed(integer 0)] ///
-			[k(integer 0)] [ALGorithm(string)] [tau(integer 1)] [REPlicate(integer 1)] ///
-			[SAVEsmap(string)] [DETails] [DIrection(string)] [PRedict(name)] [CI(integer 0)] ///
-			[Predictionhorizon(string)] [COPredict(name)] [copredictvar(string)] [RANDomize] [force] [strict] [EXTRAembed(string)] ///
-			[ALLOWMISSing] [MISSINGdistance(real 0)] [dt] [reldt] [DTWeight(real 0)] [DTSave(name)] ///
-			[oneway] [savemanifold(name)] [CODTWeight(real 0)] [dot(integer 1)] [mata] [gpu] ///
-			[nthreads(integer 0)] [saveinputs(string)] [verbosity(integer 1)] [olddt] ///
-			[aspectratio(real 1)] [distance(string)] [metrics(string)] [idw(real 0)]
+	syntax anything [if],  [e(integer 2)] [tau(integer 1)] [theta(real 1)] ///
+		[Library(numlist)] [RANDomize] [k(integer 0)] [ALGorithm(string)] [REPlicate(integer 1)] [strict] ///
+		[DIrection(string)] [seed(integer 0)] [PREDICTionsave(name)] [COPREDICTionsave(name)] [copredictvar(string)] ///
+		[CI(integer 0)] [EXTRAembed(string)] [ALLOWMISSing] [MISSINGdistance(real 0)] [dt] [reldt] ///
+		[DTWeight(real 0)] [DTSave(name)] [oneway] [DETails] [SAVEsmap(string)] [Predictionhorizon(string)] ///
+		[CODTWeight(real 0)] [dot(integer 1)] [mata] [gpu] [nthreads(integer 0)] [savemanifold(name)] [idw(real 0)] ///
+		[verbosity(integer 1)] [saveinputs(string)] [metrics(string)] [distance(string)] [aspectratio(real 1)] [wassdt(integer 1)]
 
 	if ("`strict'" != "strict") {
 		local force = "force"
@@ -1117,11 +1100,11 @@ program define edmXmap, eclass
 			di as error "dtsave() option can only be used together with oneway"
 			error 9
 		}
-		if "`predict'" != "" {
+		if "`predictionsave'" != "" {
 			dis as error "direction() option must be set to oneway if predicted values are to be saved."
 			error 197
 		}
-		if "`copredict'" != "" {
+		if "`copredictionsave'" != "" {
 			dis as error "direction() option must be set to oneway if copredicted values are to be saved."
 			error 197
 		}
@@ -1130,11 +1113,11 @@ program define edmXmap, eclass
 	if "`dtsave'" != ""{
 		confirm new variable `dtsave'
 	}
-	if "`predict'" != "" {
-		confirm new variable `predict'
+	if "`predictionsave'" != "" {
+		confirm new variable `predictionsave'
 	}
-	if "`copredict'" != "" {
-		confirm new variable `copredict'
+	if "`copredictionsave'" != "" {
+		confirm new variable `copredictionsave'
 
 		if "`copredictvar'" == "" {
 			di as error "The copredictvar() option is not specified"
@@ -1268,27 +1251,19 @@ program define edmXmap, eclass
 	local allow_missing_mode = `missingdistance' !=0 | "`allowmissing'"=="allowmissing"
 
 	local wasserstein_mode = ("`=strlower("`distance'")'" == "wasserstein")
-	if `wasserstein_mode' {
-		if ("`olddt'" == "olddt") {
-			di "Ignoring olddt option as it cannot be specified with the Wasserstein distance"
-			local olddt = ""
-		}
-	}
-
-	local parsed_dt = ("`dt'" == "dt") | ("`olddt'" == "olddt") | ("`reldt'" == "reldt")
+	local parsed_dt = ("`dt'" == "dt") | ("`reldt'" == "reldt")
 	local parsed_reldt = ("`reldt'" == "reldt")
-	local parsed_dt0 = ("`olddt'" != "olddt")
 	local parsed_dtsave = "`dtsave'"
 
 	* identify data structure
 	qui xtset
 	local timevar "`=r(timevar)'"
 	if "`=r(panelvar)'" != "." {
-		local ispanel =1
+		local ispanel = 1
 		local panel_id = r(panelvar)
 	}
 	else {
-		local ispanel =0
+		local ispanel = 0
 	}
 
 	marksample touse
@@ -1348,13 +1323,13 @@ program define edmXmap, eclass
 		mat co_r2 = J(1, 4, .)
 	}
 
-	if "`predict'" != "" {
-		cap gen double `predict' = .
-		qui label variable `predict' "edm prediction result"
+	if "`predictionsave'" != "" {
+		cap gen double `predictionsave' = .
+		qui label variable `predictionsave' "edm prediction result"
 	}
-	if "`copredict'" != "" {
-		qui gen double `copredict' = .
-		qui label variable `copredict' "edm copredicted `copredictvar' using manifold `ori_x' `ori_y'"
+	if "`copredictionsave'" != "" {
+		qui gen double `copredictionsave' = .
+		qui label variable `copredictionsave' "edm copredicted `copredictvar' using manifold `ori_x' `ori_y'"
 	}
 
 	local num_directions = 1 + ("`direction'" == "both")
@@ -1396,7 +1371,6 @@ program define edmXmap, eclass
 					// If there is no variance, no sampling required
 					local parsed_dtw = 0
 					local parsed_dt = 0
-					local parsed_dt0 = 0
 					local parsed_dtsave = ""
 				}
 			}
@@ -1408,7 +1382,7 @@ program define edmXmap, eclass
 			}
 		}
 
-		edmManifoldSize, e(`max_e') dt(`parsed_dt') dt0(`parsed_dt0') ///
+		edmManifoldSize, e(`max_e') dt(`parsed_dt') ///
 			num_extras(`z_count') num_eextras(`z_e_varying_count')
 		local manifold_size = `r(manifold_size)'
 		local total_num_extras = `r(total_num_extras)'
@@ -1516,7 +1490,7 @@ program define edmXmap, eclass
 			}
 
 			plugin call `plugin_name' `timevar' `x' `y' `z_vars' `usable' `co_xvar' `panel_id' `parsed_dtsave' `manifold_vars' if `touse', "launch_edm_tasks" ///
-					"`z_count'" "`parsed_dt'" "`parsed_dt0'" "`dtweight'" "`algorithm'" "`force'" "`missingdistance'" ///
+					"`z_count'" "`parsed_dt'" "`dtweight'" "`algorithm'" "`force'" "`missingdistance'" ///
 					"`nthreads'" "`verbosity'" "`num_tasks'" "`explore_mode'" "`full_mode'" "`shuffle'" "`crossfold'" "`tau'" ///
 					"`max_e'" "`allow_missing_mode'" "`theta'" "`aspectratio'" "`distance'" "`metrics'" ///
 					"`copredict_mode'" "`cmdline'" "`z_e_varying_count'" "`idw'" "`ispanel'" "`parsed_reldt'" "`wassdt'" "`predictionhorizon'"
@@ -1622,7 +1596,7 @@ program define edmXmap, eclass
 						local k_size = min(`k',`train_size')
 					}
 					else if `k' == 0 {
-						edmManifoldSize, e(`i') dt(`parsed_dt') dt0(`parsed_dt0') ///
+						edmManifoldSize, e(`i') dt(`parsed_dt') ///
 							num_extras(`z_count') num_eextras(`z_e_varying_count')
 
 						local is_smap = cond("`algorithm'" == "smap", 1, 0)
@@ -1657,7 +1631,7 @@ program define edmXmap, eclass
 							local mapping_name "`mapping_name' l`=`ii'*`tau''.`xx'"
 						}
 						if `parsed_dt' {
-							forvalues ii=`=(1 - `parsed_dt0')'/`=`e'-1' {
+							forvalues ii=0/`=`e'-1' {
 								local mapping_name "`mapping_name' dt`ii'"
 							}
 						}
@@ -1733,8 +1707,8 @@ program define edmXmap, eclass
 								mat r`direction_num'[`task_num', 4] = 0
 							}
 
-							if (`task_num' == `num_tasks' & "`predict'" != "") {
-								cap replace `predict' = `x_p' if `x_p' != .
+							if (`task_num' == `num_tasks' & "`predictionsave'" != "") {
+								cap replace `predictionsave' = `x_p' if `x_p' != .
 							}
 
 							if "`copredictvar'" != "" {
@@ -1754,8 +1728,8 @@ program define edmXmap, eclass
 									mat co_r`direction_num'[`task_num', 4] = 0
 								}
 
-								if (`task_num' == `num_tasks' & "`copredict'" != "") {
-									cap replace `copredict' = `co_x_p' if `co_x_p' != .
+								if (`task_num' == `num_tasks' & "`copredictionsave'" != "") {
+									cap replace `copredictionsave' = `co_x_p' if `co_x_p' != .
 								}
 							}
 
@@ -1784,13 +1758,13 @@ program define edmXmap, eclass
 		if !`mata_mode' {
 			edmPrintPluginProgress , plugin_name(`plugin_name')
 			local result_matrix = "r`direction_num'"
-			local save_predict_mode = ("`predict'" != "")
+			local save_predict_mode = ("`predictionsave'" != "")
 			local save_copredict_mode = ("`copredictvar'" != "")
-			plugin call `plugin_name' `predict' `copredict' `all_savesmap_vars`direction_num'' if `touse', ///
+			plugin call `plugin_name' `predictionsave' `copredictionsave' `all_savesmap_vars`direction_num'' if `touse', ///
 					"collect_results" "`result_matrix'" "`save_predict_mode'" "`save_copredict_mode'"
 		}
 
-		if ("`dt'" == "dt") | ("`olddt'" == "olddt") {
+		if ("`dt'" == "dt") {
 			if `parsed_dt' == 0 {
 				if "`direction'" == "oneway" {
 					local cmdfootnote "`cmdfootnote'Note: dt option is ignored due to lack of variations in time delta"
@@ -1843,7 +1817,7 @@ program define edmXmap, eclass
 
 	// the actual size of e should be main e + dt + extras
 	ereturn scalar e_main = `e'
-	edmManifoldSize, e(`e') dt(`parsed_dt') dt0(`parsed_dt0') ///
+	edmManifoldSize, e(`e') dt(`parsed_dt') ///
 		num_extras(`z_count') num_eextras(`z_e_varying_count')
 	ereturn scalar e_actual = `r(manifold_size)'
 	ereturn scalar e_offset = `r(manifold_size)' - `e'
@@ -1857,9 +1831,9 @@ program define edmXmap, eclass
 	ereturn scalar rep_details = "`details'" == "details"
 	ereturn local direction = "`direction'"
 	ereturn scalar ci = `ci'
-	ereturn local copredict ="`copredict'"
-	ereturn local copredictvar ="`copredictvar'"
-	ereturn scalar force_compute = "`force'" =="force"
+	ereturn local copredict = "`copredictionsave'"
+	ereturn local copredictvar = "`copredictvar'"
+	ereturn scalar force_compute = "`force'" == "force"
 	ereturn local extraembed = "`extraembed'"
 	ereturn scalar panel =`ispanel'
 	ereturn scalar dt =`parsed_dt'
