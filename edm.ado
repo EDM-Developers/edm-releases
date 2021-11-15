@@ -1,7 +1,7 @@
-*! version 1.9.1, 12Nov2021, Jinjing Li, Michael Zyphur, Patrick J. Laub, George Sugihara, Edoardo Tescari
+*! version 1.9.2, 15Nov2021, Jinjing Li, Michael Zyphur, Patrick J. Laub, George Sugihara, Edoardo Tescari
 *! contact: <jinjing.li@canberra.edu.au> or <patrick.laub@unimelb.edu.au>
 
-global EDM_VERSION = "1.9.1"
+global EDM_VERSION = "1.9.2"
 /* Empirical dynamic modelling
 
 Version history:
@@ -342,7 +342,7 @@ end
 
 program define edmExplore, eclass
 	syntax anything [if], [e(numlist ascending >=2)] ///
-		[tau(integer 1)] [theta(numlist ascending)] [k(integer 0)] [ALGorithm(string)] [REPlicate(integer 1)] ///
+		[tau(integer 1)] [theta(numlist ascending)] [k(integer 0)] [ALGorithm(string)] [REPlicate(integer 0)] ///
 		[seed(integer 0)] [full] [RANDomize] [PREDICTionsave(name)] [COPREDICTionsave(name)] [copredictvar(string)] ///
 		[CROSSfold(integer 0)] [CI(integer 0)] [EXTRAembed(string)] [ALLOWMISSing] [MISSINGdistance(real 0)] ///
 		[dt] [reldt] [DTWeight(real 0)] [DTSave(name)] [DETails] [reportrawe] [strict] [Predictionhorizon(string)] ///
@@ -374,11 +374,15 @@ program define edmExplore, eclass
 		}
 	}
 
-	if "`randomize'" == "randomize" | `replicate' > 1 {
+	if "`randomize'" == "randomize" | `replicate' > 0 {
 		local shuffle = 1
 	}
 	else {
 		local shuffle = 0
+	}
+
+	if `replicate' == 0 {
+		local replicate = 1
 	}
 
 	local copredictvar = strtrim("`copredictvar'")
@@ -601,14 +605,13 @@ program define edmExplore, eclass
 				foreach v of local max_e_manifold {
 					replace `usable' = 1 if `v' != . & `touse'
 				}
-				qui replace `usable' = 0 if `x_f' == .
 			}
 		}
 		else {
 			// Find which rows of the manifold have any values which are missing
 			tempvar any_missing_in_manifold
 			hasMissingValues `max_e_manifold', out(`any_missing_in_manifold')
-			gen byte `usable' = `touse' & !`any_missing_in_manifold' & `x_f' != .
+			gen byte `usable' = `touse' & !`any_missing_in_manifold'
 		}
 	}
 
@@ -630,12 +633,11 @@ program define edmExplore, eclass
 			foreach v of local max_e_co_manifold {
 				qui replace `co_usable' = 1 if `v' !=. & `touse'
 			}
-			qui replace `co_usable' = 0 if `co_x_f' == .
 		}
 		else {
 			tempvar any_missing_in_co_manifold
 			hasMissingValues `max_e_co_manifold', out(`any_missing_in_co_manifold')
-			gen byte `co_usable' = `touse' & !`any_missing_in_co_manifold' & `co_x_f' != .
+			gen byte `co_usable' = `touse' & !`any_missing_in_co_manifold'
 		}
 
 		tempvar co_predict_set
@@ -839,6 +841,8 @@ program define edmExplore, eclass
 					qui gen byte `predict_set' = `counting_up' > `half_size' & `counting_up' != .
 				}
 			}
+
+			qui replace `train_set' = 0 if `x_f' == .
 		}
 
 		if `crossfold' > 1 {
@@ -1061,7 +1065,7 @@ end
 
 program define edmXmap, eclass
 	syntax anything [if],  [e(integer 2)] [tau(integer 1)] [theta(real 1)] ///
-		[Library(numlist)] [RANDomize] [k(integer 0)] [ALGorithm(string)] [REPlicate(integer 1)] [strict] ///
+		[Library(numlist)] [RANDomize] [k(integer 0)] [ALGorithm(string)] [REPlicate(integer 0)] [strict] ///
 		[DIrection(string)] [seed(integer 0)] [PREDICTionsave(name)] [COPREDICTionsave(name)] [copredictvar(string)] ///
 		[CI(integer 0)] [EXTRAembed(string)] [ALLOWMISSing] [MISSINGdistance(real 0)] [dt] [reldt] ///
 		[DTWeight(real 0)] [DTSave(name)] [oneway] [DETails] [SAVEsmap(string)] [Predictionhorizon(string)] ///
@@ -1078,11 +1082,15 @@ program define edmXmap, eclass
 		set seed `seed'
 	}
 
-	if "`randomize'" == "randomize" | `replicate' > 1 {
+	if "`randomize'" == "randomize" | `replicate' > 0 {
 		local shuffle = 1
 	}
 	else {
 		local shuffle = 0
+	}
+
+	if `replicate' == 0 {
+		local replicate = 1
 	}
 
 	if "`oneway'" == "oneway" {
@@ -1403,7 +1411,6 @@ program define edmXmap, eclass
 				foreach v of local max_e_manifold {
 					qui replace `usable' = 1 if `v' !=. & `touse'
 				}
-				qui replace `usable' = 0 if `x_f' == .
 
 				if `missingdistance' <= 0 {
 					qui sum `x' if `touse'
@@ -1414,7 +1421,7 @@ program define edmXmap, eclass
 			else {
 				tempvar any_missing_in_manifold
 				hasMissingValues `max_e_manifold', out(`any_missing_in_manifold')
-				gen byte `usable' = `touse' & !`any_missing_in_manifold' & `x_f' != .
+				gen byte `usable' = `touse' & !`any_missing_in_manifold'
 			}
 		}
 
@@ -1430,12 +1437,11 @@ program define edmXmap, eclass
 				foreach v of local max_e_co_manifold {
 					qui replace `co_usable' = 1 if `v' !=. & `touse'
 				}
-				qui replace `co_usable' = 0 if `co_x_f' == .
 			}
 			else {
 				tempvar any_missing_in_co_manifold
 				hasMissingValues `max_e_co_manifold', out(`any_missing_in_co_manifold')
-				gen byte `co_usable' = `touse' & !`any_missing_in_co_manifold' & `co_x_f' != .
+				gen byte `co_usable' = `touse' & !`any_missing_in_co_manifold' //& `co_x_f' != .
 			}
 
 			tempvar co_predict_set
@@ -1587,6 +1593,7 @@ program define edmXmap, eclass
 							qui gen double `urank' = sum(`usable')
 						}
 						qui replace `train_set' = `urank' <= `lib_size' & `usable'
+						qui replace `train_set' = 0 if `x_f' == .
 					}
 
 					local train_size = `lib_size'

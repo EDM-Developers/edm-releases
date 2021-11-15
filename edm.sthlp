@@ -17,7 +17,7 @@ for seasonal differencing).
 variable for exploration using simplex projection or S-mapping.
 
 {p 8 12 2}  {bf:edm} explore {bf:variable} [if {bf:exp}], [e(numlist ascending >=2)]
-[tau(integer 1)] [theta(numlist ascending)] [k(integer 0)] [ALGorithm(string)] [REPlicate(integer 1)]
+[tau(integer 1)] [theta(numlist ascending)] [k(integer 0)] [ALGorithm(string)] [REPlicate(integer 0)]
 [seed(integer 0)] [full] [RANDomize] [PREDICTionsave(name)] [COPREDICTionsave(name)] [copredictvar(string)]
 [CROSSfold(integer 0)] [CI(integer 0)] [EXTRAembed(string)] [ALLOWMISSing] [MISSINGdistance(real 0)]
 [dt] [reldt] [DTWeight(real 0)] [DTSave(name)] [DETails] [reportrawe] [strict] [Predictionhorizon(string)]
@@ -29,7 +29,7 @@ of the same options with the explore subcommand although there are some differen
 different purpose of the analysis.
 
 {p 8 12 2}  {bf:edm} xmap {bf:variables} [if {bf:exp}], [e(integer 2)] [tau(integer 1)] [theta(real 1)]
-[Library(numlist)] [RANDomize] [k(integer 0)] [ALGorithm(string)] [REPlicate(integer 1)] [strict]
+[Library(numlist)] [RANDomize] [k(integer 0)] [ALGorithm(string)] [REPlicate(integer 0)] [strict]
 [DIrection(string)] [seed(integer 0)] [PREDICTionsave(name)] [COPREDICTionsave(name)] [copredictvar(string)]
 [CI(integer 0)] [EXTRAembed(string)] [ALLOWMISSing] [MISSINGdistance(real 0)] [dt] [reldt]
 [DTWeight(real 0)] [DTSave(name)] [oneway] [DETails] [SAVEsmap(string)] [Predictionhorizon(string)]
