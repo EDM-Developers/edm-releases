@@ -1,7 +1,7 @@
-*! version 1.9.3, 22Nov2021, Jinjing Li, Michael Zyphur, Patrick J. Laub, George Sugihara, Edoardo Tescari
+*! version 1.9.4, 26Nov2021, Jinjing Li, Michael Zyphur, Patrick J. Laub, George Sugihara, Edoardo Tescari
 *! contact: <jinjing.li@canberra.edu.au> or <patrick.laub@unimelb.edu.au>
 
-global EDM_VERSION = "1.9.3"
+global EDM_VERSION = "1.9.4"
 /* Empirical dynamic modelling
 
 Version history:
@@ -347,7 +347,7 @@ program define edmExplore, eclass
 		[CROSSfold(integer 0)] [CI(integer 0)] [EXTRAembed(string)] [ALLOWMISSing] [MISSINGdistance(real 0)] ///
 		[dt] [reldt] [DTWeight(real 0)] [DTSave(name)] [DETails] [reportrawe] [strict] [Predictionhorizon(string)] ///
 		[CODTWeight(real 0)] [dot(integer 1)] [mata] [gpu] [nthreads(integer 0)] [savemanifold(name)] [idw(real 0)] ///
-		[verbosity(integer 1)] [saveinputs(string)] [metrics(string)] [distance(string)] [aspectratio(real 1)] [wassdt(integer 1)]
+		[verbosity(integer 1)] [saveinputs(string)] [lowmemory] [metrics(string)] [distance(string)] [aspectratio(real 1)] [wassdt(integer 1)]
 
 	if ("`strict'" != "strict") {
 		local force = "force"
@@ -442,6 +442,12 @@ program define edmExplore, eclass
 		local algorithm "simplex"
 	}
 
+	local allow_missing_mode = `missingdistance' != 0 | "`allowmissing'" == "allowmissing"
+	if `allow_missing_mode' & "`algorithm'" == "smap" {
+		dis as error "Can't use 'allowmissing' with S-map algorithm"
+		error 121
+	}
+
 	edmPluginCheck, `mata' `gpu'
 	local mata_mode = r(mata_mode)
 
@@ -484,7 +490,6 @@ program define edmExplore, eclass
 		local saveinputs = "${EDM_SAVE_INPUTS}"
 	}
 
-	local allow_missing_mode = `missingdistance' !=0 | "`allowmissing'"=="allowmissing"
 	local wasserstein_mode = ("`=strlower("`distance'")'" == "wasserstein")
 	local parsed_dt = ("`dt'" == "dt") | ("`reldt'" == "reldt")
 	local parsed_reldt = ("`reldt'" == "reldt")
@@ -669,6 +674,8 @@ program define edmExplore, eclass
 
 		local rngstate = c(rngstate)
 
+		local low_memory_mode = "`lowmemory'" == "lowmemory"
+
 		if "`parsed_dtsave'" != "" {
 			qui gen double `parsed_dtsave' = .
 		}
@@ -690,7 +697,7 @@ program define edmExplore, eclass
 				"`z_count'" "`parsed_dt'" "`dtweight'" "`algorithm'" "`force'" "`missingdistance'" ///
 				"`nthreads'" "`verbosity'" "`num_tasks'" "`explore_mode'" "`full_mode'" "`shuffle'" "`crossfold'" "`tau'" ///
 				"`max_e'" "`allow_missing_mode'" "`theta'" "`aspectratio'"  "`distance'" "`metrics'" ///
-				"`copredict_mode'" "`cmdline'" "`z_e_varying_count'" "`idw'" "`ispanel'" "`parsed_reldt'" "`wassdt'" "`predictionhorizon'"
+				"`copredict_mode'" "`cmdline'" "`z_e_varying_count'" "`idw'" "`ispanel'" "`parsed_reldt'" "`wassdt'" "`predictionhorizon'" "`low_memory_mode'"
 
 		local missingdistance = `missing_dist_used'
 
@@ -1092,7 +1099,7 @@ program define edmXmap, eclass
 		[CI(integer 0)] [EXTRAembed(string)] [ALLOWMISSing] [MISSINGdistance(real 0)] [dt] [reldt] ///
 		[DTWeight(real 0)] [DTSave(name)] [oneway] [DETails] [SAVEsmap(string)] [Predictionhorizon(string)] ///
 		[CODTWeight(real 0)] [dot(integer 1)] [mata] [gpu] [nthreads(integer 0)] [savemanifold(name)] [idw(real 0)] ///
-		[verbosity(integer 1)] [saveinputs(string)] [metrics(string)] [distance(string)] [aspectratio(real 1)] [wassdt(integer 1)]
+		[verbosity(integer 1)] [saveinputs(string)] [lowmemory] [metrics(string)] [distance(string)] [aspectratio(real 1)] [wassdt(integer 1)]
 
 	if ("`strict'" != "strict") {
 		local force = "force"
@@ -1209,6 +1216,13 @@ program define edmXmap, eclass
 		dis as error "savesmap() option should only be specified with S-map"
 		error 119
 	}
+
+	local allow_missing_mode = `missingdistance' != 0 | "`allowmissing'" == "allowmissing"
+	if `allow_missing_mode' & "`algorithm'" == "smap" {
+		dis as error "Can't use 'allowmissing' with S-map algorithm"
+		error 121
+	}
+
 	if "`direction'" == ""  {
 		local direction "both"
 	}
@@ -1277,8 +1291,6 @@ program define edmXmap, eclass
 	if "${EDM_SAVE_INPUTS}" != "" {
 		local saveinputs = "${EDM_SAVE_INPUTS}"
 	}
-
-	local allow_missing_mode = `missingdistance' !=0 | "`allowmissing'"=="allowmissing"
 
 	local wasserstein_mode = ("`=strlower("`distance'")'" == "wasserstein")
 	local parsed_dt = ("`dt'" == "dt") | ("`reldt'" == "reldt")
@@ -1498,6 +1510,8 @@ program define edmXmap, eclass
 
 			local rngstate = c(rngstate)
 
+			local low_memory_mode = "`lowmemory'" == "lowmemory"
+
 			if "`parsed_dtsave'" != "" {
 				qui gen double `parsed_dtsave' = .
 			}
@@ -1518,7 +1532,7 @@ program define edmXmap, eclass
 					"`z_count'" "`parsed_dt'" "`dtweight'" "`algorithm'" "`force'" "`missingdistance'" ///
 					"`nthreads'" "`verbosity'" "`num_tasks'" "`explore_mode'" "`full_mode'" "`shuffle'" "`crossfold'" "`tau'" ///
 					"`max_e'" "`allow_missing_mode'" "`theta'" "`aspectratio'" "`distance'" "`metrics'" ///
-					"`copredict_mode'" "`cmdline'" "`z_e_varying_count'" "`idw'" "`ispanel'" "`parsed_reldt'" "`wassdt'" "`predictionhorizon'"
+					"`copredict_mode'" "`cmdline'" "`z_e_varying_count'" "`idw'" "`ispanel'" "`parsed_reldt'" "`wassdt'" "`predictionhorizon'" "`low_memory_mode'"
 
 			local missingdistance`direction_num' = `missing_dist_used'
 
@@ -2813,44 +2827,39 @@ real scalar mf_smap_single(
 	d = J(1, n, .)
 
 	for(i = 1; i <= n; i++) {
-		if (algorithm =="smap" && (hasmissing(y[i]) | hasmissing(M[i,.]))) {
+		a = M[i,.] - b
+
+		for (j = 1; j <= cols(a); j++) {
+			if (factorVars[j]) {
+				a[j] = M[i,j] != b[j]
+			}
+		}
+
+		if (missingdistance != 0) {
+			a = editvalue(a,. , missingdistance)
+		}
+
+		/* d is (temporarily) the squared Euclidean distance */
+		d[i] = (a*a')
+
+		/* If we have panel data, penalise the points if they
+		 * come from different panels */
+		if (idw != 0) {
+			if (panel_ids[i] != targetPanel) {
+				if (idw < 0) {
+					d[i] = .
+				}
+				else {
+					d[i] = d[i] + idw
+				}
+			}
+		}
+
+		/* Now d is the Euclidean distance */
+		d[i] = d[i]^(1/2)
+
+		if (d[i] == 0) {
 			d[i] = .
-		} else {
-
-			a = M[i,.] - b
-
-			for (j = 1; j <= cols(a); j++) {
-				if (factorVars[j]) {
-					a[j] = M[i,j] != b[j]
-				}
-			}
-			
-			if (missingdistance != 0) {
-				a = editvalue(a,. , missingdistance)
-			}
-
-			/* d is (temporarily) the squared Euclidean distance */
-			d[i] = (a*a')
-
-			/* If we have panel data, penalise the points if they
-			 * come from different panels */
-			if (idw != 0) {
-				if (panel_ids[i] != targetPanel) {
-					if (idw < 0) {
-						d[i] = .
-					}
-					else {
-						d[i] = d[i] + idw
-					}
-				}
-			}
-
-			/* Now d is the Euclidean distance */
-			d[i] = d[i]^(1/2)
-
-			if (d[i] == 0) {
-				d[i] = .
-			}
 		}
 	}
 

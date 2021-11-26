@@ -22,6 +22,7 @@ variable for exploration using simplex projection or S-mapping.
 [CROSSfold(integer 0)] [CI(integer 0)] [EXTRAembed(string)] [ALLOWMISSing] [MISSINGdistance(real 0)]
 [dt] [reldt] [DTWeight(real 0)] [DTSave(name)] [DETails] [reportrawe] [strict] [Predictionhorizon(string)]
 [CODTWeight(real 0)] [dot(integer 1)] [mata] [gpu] [nthreads(integer 0)] [savemanifold(name)] [idw(real 0)]
+[lowmemory]
 
 {p 4 4 2}  The second subcommand {bf:xmap} performs convergent cross-mapping (CCM). The subcommand
 follows the syntax below and requires two variables to follow immediately after xmap. It shares many
@@ -34,6 +35,7 @@ different purpose of the analysis.
 [CI(integer 0)] [EXTRAembed(string)] [ALLOWMISSing] [MISSINGdistance(real 0)] [dt] [reldt]
 [DTWeight(real 0)] [DTSave(name)] [oneway] [DETails] [SAVEsmap(string)] [Predictionhorizon(string)]
 [CODTWeight(real 0)] [dot(integer 1)] [mata] [gpu] [nthreads(integer 0)] [savemanifold(name)] [idw(real 0)]
+[lowmemory]
 
 {p 4 4 2} The third subcommand {bf:update} updates the plugin to its latest version
 
@@ -218,6 +220,11 @@ from all panels is mixed together and treatly equally. If idw(-1) is set (or any
 value), then the weight is treated as 'infinity', so neighbours will never be selected which cross
 the boundaries between panels. Setting idw(-1) with k(-1) means we may use a different number of
 neighbors for different predictions (i.e. if the panels are unbalanced).
+
+{phang}  {bf:lowmemory}: It is possible that RAM may be depleted while running edm on large datasets
+with large values of E. The lowmemory flag directs the plugin to try to save as much space as possible
+by more efficiently using memory, though for small datasets this will likely slow down the computations
+by a small but noticeable amount.
 
 {phang}  Besides the shared parameters, edm explore supports the following extra options:
 
