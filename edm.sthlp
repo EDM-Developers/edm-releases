@@ -21,7 +21,7 @@ variable for exploration using simplex projection or S-mapping.
 [seed(integer 0)] [full] [RANDomize] [PREDICTionsave(name)] [COPREDICTionsave(name)] [copredictvar(string)]
 [CROSSfold(integer 0)] [CI(integer 0)] [EXTRAembed(string)] [ALLOWMISSing] [MISSINGdistance(real 0)]
 [dt] [reldt] [DTWeight(real 0)] [DTSave(name)] [DETails] [reportrawe] [strict] [Predictionhorizon(string)]
-[CODTWeight(real 0)] [dot(integer 1)] [mata] [gpu] [nthreads(integer 0)] [savemanifold(name)] [idw(real 0)]
+[dot(integer 1)] [mata] [gpu] [nthreads(integer 0)] [savemanifold(name)] [idw(real 0)]
 [lowmemory]
 
 {p 4 4 2}  The second subcommand {bf:xmap} performs convergent cross-mapping (CCM). The subcommand
@@ -34,7 +34,7 @@ different purpose of the analysis.
 [DIrection(string)] [seed(integer 0)] [PREDICTionsave(name)] [COPREDICTionsave(name)] [copredictvar(string)]
 [CI(integer 0)] [EXTRAembed(string)] [ALLOWMISSing] [MISSINGdistance(real 0)] [dt] [reldt]
 [DTWeight(real 0)] [DTSave(name)] [oneway] [DETails] [SAVEsmap(string)] [Predictionhorizon(string)]
-[CODTWeight(real 0)] [dot(integer 1)] [mata] [gpu] [nthreads(integer 0)] [savemanifold(name)] [idw(real 0)]
+[dot(integer 1)] [mata] [gpu] [nthreads(integer 0)] [savemanifold(name)] [idw(real 0)]
 [lowmemory]
 
 {p 4 4 2} The third subcommand {bf:update} updates the plugin to its latest version
@@ -92,7 +92,7 @@ library to be used for predictions with the weightings in theta. However, with l
 may be computationally burdensome and therefore k(100) or perhaps k(500) may be preferred if T or NT
 is large.
 
-{phang}  {bf:algorithm(string)}: This option specifies the algorithm used for prediction. If not
+{phang}  {bf:ALGorithm(string)}: This option specifies the algorithm used for prediction. If not
 specified, simplex projection (a locally weighted average) is used. Valid options include simplex
 and smap, the latter of which is a sequential locally weighted global linear mapping (or S-map as
 noted previously). In the case of the xmap subcommand where two variables predict each other, the
@@ -108,7 +108,7 @@ the oldest observations go into the library set and the newest observations to t
 Though if the randomize option is specified, the data is allocated into the two sets in a random
 fashion. If the replicate option is specified, then this randomization is enabled automatically.
 
-{phang}  {bf:replicate(integer)}: The explore subcommand uses a random 50/50 split for simplex
+{phang}  {bf:REPlicate(integer)}: The explore subcommand uses a random 50/50 split for simplex
 projection and S-maps, whereas the xmap subcommand selects the observations randomly for library
 construction if the size of the library L is smaller than the size of all available observations. In
 these cases, results may be different in each run because the embedding vectors (i.e., the
@@ -121,11 +121,11 @@ of the results are reported across the 50 runs by default. As we note below, it 
 all estimates for post-processing using typical Stata commands such as svmat, allowing the graphing
 of results or finding percentile-based with the pctile command.
 
-{phang}  {bf:predict(variable)}: This option allows you to save the internal prediction result of
-the edm as a variable, which could be useful for plotting and diagnosis.
+{phang}  {bf:PREDICTionsave(variable)}: This option allows you to save the edm predictions
+as a variable, which could be useful for plotting and diagnosis.
 
-{phang}  {bf:copredict(variable)}: This option allows you to save the coprediction result as a
-variable. You must specify the copredictvar(variables) options for this to work.
+{phang}  {bf:COPREDICTionsave(variable)}: This option allows you to save the copredictions
+as a variable. You must specify the copredictvar(variables) options for this to work.
 
 {phang}  {bf:copredictvar(variable)}: This option specifies the variable used for coprediction.
 A second prediction is run for each configuration of E, library, etc., using the same library set
@@ -135,12 +135,12 @@ but with a prediction set built from the lagged embedding of this variable.
 which we predict. By default, the explore mode predict τ observations ahead and the xmap mode uses p(0).
 This parameter can be negative.
 
-{phang}  {bf:details}: By default, only mean values and standard deviations are reported when the
+{phang}  {bf:DETails}: By default, only mean values and standard deviations are reported when the
 replicate option is specified. The details option overrides this behaviour by providing results for
 each individual run. Irrespective of using this option, all results can be saved for
 post-processing.
 
-{phang}  {bf:ci(integer)}: When used with replicate() or crossfold(), this option reports the
+{phang}  {bf:CI(integer)}: When used with replicate() or crossfold(), this option reports the
 confidence interval for the mean of the estimates (MAE and/or ρ), as well as the percentiles of
 their distribution. The first row of output labelled “Est. mean CI” reports the estimated confidence
 interval of the mean ρ, assuming that ρ has a normal distribution—estimated as the corrected sample
@@ -185,7 +185,7 @@ the vector. This enables computations with missing values. The option implies al
 default, the distance is set to the expected distance of two random draws in a normal distribution,
 which equals to 2/sqrt(pi) * standard deviation of the mapping variable.
 
-{phang}  {bf:extraembed(variables)}: This option allows incorporating additional variables into the
+{phang}  {bf:EXTRAembed(variables)}: This option allows incorporating additional variables into the
 embedding (multivariate embedding), e.g. extra(z l.z). Time series lists are unabbreviated here,
 e.g. extra(L(1/3).z) will be equivalent to extra(L1.z L2.z L3.z). Normally, lagged versions of the
 extra variables are not included in the embedding, however the syntax extra(z(e)) includes e lags
@@ -204,10 +204,10 @@ that it includes E extra variables for an embedding with E dimensions. However t
 differences added are not the time between the corresponding observations, but the time of the
 target/predictand minus the time of the lagged observations.
 
-{phang}  {bf:dtweight(real)}: This option specifies the weight used for the timestamp differencing
+{phang}  {bf:DTWeight(real)}: This option specifies the weight used for the timestamp differencing
 variable.
 
-{phang}  {bf:dtsave(variable)}: This option allows users to save the internally generated timestamp
+{phang}  {bf:DTSave(variable)}: This option allows users to save the internally generated timestamp
 differencing variable.
 
 {phang}  {bf:nthreads(integer)}: The number of threads the C++ plugin will use for parallel
@@ -228,7 +228,7 @@ by a small but noticeable amount.
 
 {phang}  Besides the shared parameters, edm explore supports the following extra options:
 
-{phang}  {bf:crossfold(integer)}: This option asks the program to run a cross-fold validation of the
+{phang}  {bf:CROSSfold(integer)}: This option asks the program to run a cross-fold validation of the
 predicted variables. crossfold(5) indicates a 5-fold cross validation. Note that this cannot be used
 together with replicate. This option is only available with the `explore` subcommand.
 
@@ -240,7 +240,7 @@ the same as leave-one-out cross-validation as the observation itself is not used
 this option, the program will only report the number of dimensions constructed from the main
 variable.
 
-{phang}  {bf:library(numlist ascending)}: 	This option specifies the total library size L used for
+{phang}  {bf:Library(numlist ascending)}: 	This option specifies the total library size L used for
 the manifold reconstruction. Varying the library size is used to estimate the convergence property
 of the cross-mapping, with a minimum value Lmin = E + 2 and the maximum equal to the total number of
 observations minus sufficient lags (e.g., in the time-series case without missing data this is Lmax
@@ -249,7 +249,7 @@ rate of convergence (i.e., the rate at which ρ increases as L grows), the full 
 sizes at small values of L can be used, such as if E = 2 and T = 100, with the setting then perhaps
 being library(4(1)25 30(5)50 54(15)99). This option is only available with the `xmap` subcommand.
 
-{phang}  {bf:savesmap(string)}: This option allows smap coefficients to be stored in variables with
+{phang}  {bf:SAVEsmap(string)}: This option allows smap coefficients to be stored in variables with
 a specified prefix. For example, specifying “edm xmap x y, algorithm(smap) savesmap(beta) k(-1)”will
 create a set of new variables such as beta1_b0_rep1. The string prefix (e.g., ‘beta’) must not be
 shared with any variables in the dataset, and the option is only valid if the algorithm(smap) is
@@ -281,7 +281,7 @@ that is being predicted, which allows plotting each of the E estimated coefficie
 and/or the values of the variable being predicted. The variables are also automatically labelled for
 clarity. This option is only available with the `xmap` subcommand.
 
-{phang}  {bf:direction(string)}: This option allows users to control whether the cross mapping is
+{phang}  {bf:DIrection(string)}: This option allows users to control whether the cross mapping is
 calculated bidirectionally or unidirectionally, the latter of which reduces computation times if
 bidirectional mappings are not required. Valid options include “oneway” and “both”, the latter of
 which is the default and computes both possible cross-mappings. When oneway is chosen, the first

@@ -1,7 +1,7 @@
-*! version 1.9.5, 29Nov2021, Jinjing Li, Michael Zyphur, Patrick J. Laub, George Sugihara, Edoardo Tescari
+*! version 1.9.6, 01Dec2021, Jinjing Li, Michael Zyphur, Patrick J. Laub, George Sugihara, Edoardo Tescari
 *! contact: <jinjing.li@canberra.edu.au> or <patrick.laub@unimelb.edu.au>
 
-global EDM_VERSION = "1.9.5"
+global EDM_VERSION = "1.9.6"
 /* Empirical dynamic modelling
 
 Version history:
@@ -341,12 +341,12 @@ program define edmPrintPluginProgress
 end
 
 program define edmExplore, eclass
-	syntax anything [if], [e(numlist ascending >=2)] ///
+	syntax anything [if], [e(numlist ascending >=1)] ///
 		[tau(integer 1)] [theta(numlist ascending)] [k(integer 0)] [ALGorithm(string)] [REPlicate(integer 0)] ///
 		[seed(integer 0)] [full] [RANDomize] [PREDICTionsave(name)] [COPREDICTionsave(name)] [copredictvar(string)] ///
 		[CROSSfold(integer 0)] [CI(integer 0)] [EXTRAembed(string)] [ALLOWMISSing] [MISSINGdistance(real 0)] ///
 		[dt] [reldt] [DTWeight(real 0)] [DTSave(name)] [DETails] [reportrawe] [strict] [Predictionhorizon(string)] ///
-		[CODTWeight(real 0)] [dot(integer 1)] [mata] [gpu] [nthreads(integer 0)] [savemanifold(name)] [idw(real 0)] ///
+		[dot(integer 1)] [mata] [gpu] [nthreads(integer 0)] [savemanifold(name)] [idw(real 0)] ///
 		[verbosity(integer 1)] [saveinputs(string)] [lowmemory] [metrics(string)] [distance(string)] [aspectratio(real 1)] [wassdt(integer 1)]
 
 	if ("`strict'" != "strict") {
@@ -1098,7 +1098,7 @@ program define edmXmap, eclass
 		[DIrection(string)] [seed(integer 0)] [PREDICTionsave(name)] [COPREDICTionsave(name)] [copredictvar(string)] ///
 		[CI(integer 0)] [EXTRAembed(string)] [ALLOWMISSing] [MISSINGdistance(real 0)] [dt] [reldt] ///
 		[DTWeight(real 0)] [DTSave(name)] [oneway] [DETails] [SAVEsmap(string)] [Predictionhorizon(string)] ///
-		[CODTWeight(real 0)] [dot(integer 1)] [mata] [gpu] [nthreads(integer 0)] [savemanifold(name)] [idw(real 0)] ///
+		[dot(integer 1)] [mata] [gpu] [nthreads(integer 0)] [savemanifold(name)] [idw(real 0)] ///
 		[verbosity(integer 1)] [saveinputs(string)] [lowmemory] [metrics(string)] [distance(string)] [aspectratio(real 1)] [wassdt(integer 1)]
 
 	if ("`strict'" != "strict") {
@@ -1177,6 +1177,16 @@ program define edmXmap, eclass
 	// PJL: If these are varlists then it is fine. If they are real values, we can delete these defaults
 	if "`e'" == "" {
 		local e = "2"
+	}
+
+	if (`e' < 1) {
+		dis as error "The proposed embedding dimension E is too small."
+		error 121
+	}
+
+	if (`e' > 100000) {
+		dis as error "The proposed embedding dimension E is too big."
+		error 121
 	}
 
 	if "`theta'" == ""{
@@ -1349,16 +1359,6 @@ program define edmXmap, eclass
 		local z_vars = "`z_vars' `z'"
 	}
 	edmPreprocessExtras `z_names' , touse(`touse') z_vars(`z_vars')
-
-	if (`e' < 2) {
-		dis as error "The proposed embedding dimension E is too small."
-		error 121
-	}
-
-	if (`e' > 100000) {
-		dis as error "The proposed embedding dimension E is too big."
-		error 121
-	}
 
 	mat r2 = J(1, 4, .)
 	if "`copredictvar'" != "" {
