@@ -1,7 +1,7 @@
-*! version 1.9.6, 01Dec2021, Jinjing Li, Michael Zyphur, Patrick J. Laub, George Sugihara, Edoardo Tescari
+*! version 1.9.7, 07Dec2021, Jinjing Li, Michael Zyphur, Patrick J. Laub, George Sugihara, Edoardo Tescari
 *! contact: <jinjing.li@canberra.edu.au> or <patrick.laub@unimelb.edu.au>
 
-global EDM_VERSION = "1.9.6"
+global EDM_VERSION = "1.9.7"
 /* Empirical dynamic modelling
 
 Version history:
@@ -457,6 +457,11 @@ program define edmExplore, eclass
 		}
 		else {
 			local plugin_name = "edm_plugin"
+		}
+
+		if `r(gpu_mode)' & "`lowmemory'" == "lowmemory" {
+			di as text "Warning: Lowmemory mode currently not working with the GPU implementation."
+			local lowmemory = ""
 		}
 	}
 
@@ -1250,6 +1255,11 @@ program define edmXmap, eclass
 		}
 		else {
 			local plugin_name = "edm_plugin"
+		}
+
+		if `r(gpu_mode)' & "`lowmemory'" == "lowmemory" {
+			di as text "Warning: Lowmemory mode currently not working with the GPU implementation."
+			local lowmemory = ""
 		}
 	}
 
