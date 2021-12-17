@@ -176,7 +176,7 @@ number of neighboring observations is not present. By default, if not all of the
 are available, the computation will just continue using as many as possible.
 
 {phang}  {bf:ALLOWMISSing} This option allows observations with missing values to be used in the
-manifold. Vectors with at least one non-missing values will be used in the mainfold construction.
+manifold. Vectors with at least one non-missing values will be used in the manifold construction.
 Distance computations are adapted to allow missing values when this option is specified.
 
 {phang}  {bf:MISSINGdistance(real)}: This option allows users to specify the assumed distance
