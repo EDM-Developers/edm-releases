@@ -250,7 +250,7 @@ sizes at small values of L can be used, such as if E = 2 and T = 100, with the s
 being library(4(1)25 30(5)50 54(15)99). This option is only available with the `xmap` subcommand.
 
 {phang}  {bf:SAVEsmap(string)}: This option allows smap coefficients to be stored in variables with
-a specified prefix. For example, specifying “edm xmap x y, algorithm(smap) savesmap(beta) k(-1)”will
+a specified prefix. For example, specifying “edm xmap x y, algorithm(smap) savesmap(beta) k(-1)” will
 create a set of new variables such as beta1_b0_rep1. The string prefix (e.g., ‘beta’) must not be
 shared with any variables in the dataset, and the option is only valid if the algorithm(smap) is
 specified. In terms of the saved variables such as beta1_b0_rep1, the first number immediately after
@@ -263,8 +263,8 @@ that any Y→X effect associated with the beta1_ prefix is shown as Y|M_X, becau
 to cross-map the predictor, and thus the reported coefficients will be scaled in the opposite
 direction of a typical regression (because in CCM the outcome variable predicts the cause). To get
 more familiar regression coefficients (which will be locally weighted), variables starting with
-beta2_ store the coefficients estimated in the other direction, where the second listed variable‘y’
-is used for the manifold reconstruction M_Y for the mapping X|M_Y in the “edm xmap x y”case, testing
+beta2_ store the coefficients estimated in the other direction, where the second listed variable ‘y’
+is used for the manifold reconstruction M_Y for the mapping X|M_Y in the “edm xmap x y” case, testing
 the opposite X→Y effect in CCM, but with reported S-map coefficients that map to a Y→X regression.
 We appreciate that this may be unintuitive, but because CCM causation is tested by predicting the
 causal variable with the outcome, to get more familiar regression coefficients requires reversing
@@ -338,7 +338,7 @@ Chicago crime dataset example (included in the auxiliary file)
 
 {title:Suggested Citation}
 
-{phang}  Li, J, Zyphur, M & Sugihara, G (under review). Beyond linearity, stability, and
+{phang}  Li, J, Zyphur, M & Sugihara, G. Beyond linearity, stability, and
 equilibrium: The edm package for empirical dynamic modeling and convergent cross-mapping, Stata
 Journal
 
