@@ -1,7 +1,7 @@
-*! version 1.9.9, 23Jan2022, Jinjing Li, Michael Zyphur, Patrick J. Laub, George Sugihara, Edoardo Tescari
+*! version 1.9.10, 21Dec2022, Jinjing Li, Michael Zyphur, Patrick J. Laub, George Sugihara, Edoardo Tescari
 *! contact: <jinjing.li@canberra.edu.au> or <patrick.laub@gmail.com>
 
-global EDM_VERSION = "1.9.9"
+global EDM_VERSION = "1.9.10"
 /* Empirical dynamic modelling
 
 Version history:
@@ -133,7 +133,7 @@ program define edmUpdate
 			cd "`updateFolder'"
 		}
 
-		local path "https://github.com/EDM-Developers/EDM/releases/latest/download/edm-stata-package.zip"
+		local path "https://github.com/EDM-Developers/edm-stata/releases/latest/download/edm-stata-package.zip"
 		quietly copy "`path'" "edm-stata-package.zip", replace
 		quietly unzipfile "edm-stata-package.zip", replace
 
